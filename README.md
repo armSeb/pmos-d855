@@ -1,0 +1,131 @@
+# postmarketOS mainline pour LG G3 (D855)
+
+Portage de postmarketOS sur le LG G3 international (D855, Snapdragon 801 /
+MSM8974AC) avec le noyau **mainline** (`linux-postmarketos-qcom-msm8974`) au
+lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
+
+## Contenu du dépôt
+
+| Chemin | Rôle |
+|---|---|
+| `dts/qcom-msm8974pro-lge-d855.dts` | Device tree mainline (source de référence) |
+| `kernel/0001-…-D855.patch` | Le même DTS + entrée Makefile, au format patch pour le fork [msm8974-mainline/linux](https://github.com/msm8974-mainline/linux) (`qcom-msm8974-6.16.y`) |
+| `pmaports/device/testing/device-lg-d855/` | Paquet appareil pmOS (deviceinfo + APKBUILD) |
+| `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap |
+| `tools/extract-firmware.sh` | Copie des firmwares depuis les partitions Android (à lancer sur le téléphone) |
+
+## État du DTS
+
+Le squelette compile proprement contre le fork 6.16 (aucun avertissement
+propre au fichier). **Rien n'a encore été testé sur le matériel.**
+
+| Bloc | Composant | Dans le DTS | Driver mainline |
+|---|---|---|---|
+| eMMC | SDHC1 | activé | oui |
+| microSD | SDHC2, CD = TLMM 95 | activé | oui |
+| USB | ChipIdea + HS PHY | activé (gadget/OTG) | oui |
+| Boutons | Volume (PM8941 GPIO 2/3), power | activé | oui |
+| Chargeur | bq24296 @ blsp1_i2c1 0x6b | activé | oui (`bq24190_charger`) |
+| Jauge | MAX17048 @ 0x36, IRQ TLMM 9 | activé | oui (`max17040_battery`) |
+| Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé | oui (RMI4) |
+| WiFi | BCM4339 sur SDHC3, REG_ON TLMM 69, host-wake TLMM 44 | activé | oui (`brcmfmac`, firmware requis) |
+| Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
+| Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
+| Panel | LGD SIC 1440p, vidéo, **double DSI** | absent | **à écrire** |
+| GPU | Adreno 330 | désactivé (attend le panel) | oui (freedreno) |
+| Bluetooth | BCM4339, BLSP1 UART5 | absent | nœud UART à ajouter |
+| Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
+| Audio, capteurs, caméra, NFC | | absents | |
+
+Câblage relevé dans le noyau LineageOS
+[`android_kernel_lge_g3` (lineage-18.1)](https://github.com/LineageOS/android_kernel_lge_g3/tree/lineage-18.1/arch/arm/boot/dts/msm8974pro-g3-global_com),
+fichiers `msm8974pro-g3-global_com/*`, `msm8974pro-lge-common/*`,
+`arch/arm/mach-msm/lge/wifi_bcm_lge.c` et `8974ac-g3/board-8974-g3-*.c`.
+Modèles mainline : Nexus 5 (même conception LG pour l'alimentation, le
+chargeur et la jauge) et Xperia Z3 (microSD sur SDHC2, WiFi sur SDHC3).
+
+## Premier boot
+
+Principe : **seul lk2nd est flashé**. Le noyau est envoyé par USB à chaque
+essai, le rootfs est sur la microSD, Android reste intact sur l'eMMC.
+
+### 0. Sauvegardes (depuis TWRP)
+
+```sh
+adb shell dd if=/dev/block/bootdevice/by-name/boot of=/sdcard/boot.img
+adb shell dd if=/dev/block/bootdevice/by-name/recovery of=/sdcard/recovery.img
+adb pull /sdcard/boot.img /sdcard/recovery.img .
+```
+
+### 1. lk2nd
+
+Construire ou télécharger `lk2nd-msm8974` (le D855 est dans la liste des
+appareils supportés), puis le flasher dans `boot`. Les bootloaders LG
+exigent une image « bumpée » : suivre la doc lk2nd pour le G3.
+Ensuite, le téléphone démarre sur l'écran fastboot de lk2nd.
+
+### 2. pmbootstrap avec ce dépôt
+
+```sh
+pmbootstrap init                       # appareil : lg-d855, UI : console d'abord
+# copier le paquet appareil dans pmaports (remplace le port downstream)
+cp -r pmaports/device/testing/device-lg-d855 "$(pmbootstrap config aports)/device/testing/"
+# ajouter le patch DTS au noyau (vérifier l'emplacement du paquet dans pmaports)
+cp kernel/0001-*.patch "$(pmbootstrap config aports)/device/community/linux-postmarketos-qcom-msm8974/"
+#   puis l'ajouter à source= dans son APKBUILD et lancer :
+pmbootstrap checksum linux-postmarketos-qcom-msm8974
+pmbootstrap install --sdcard=/dev/sdX  # rootfs sur la microSD
+```
+
+> L'ancien `device-lg-d855` downstream existe déjà dans pmaports : vérifier
+> son emplacement exact et retirer l'un des deux.
+
+### 3. Boot sans rien flasher
+
+```sh
+pmbootstrap flasher boot               # envoie boot.img (noyau + initramfs) via fastboot
+```
+
+L'initramfs trouve `pmOS_root` par son label, sur la microSD.
+Si le boot échoue avant le rootfs, ajouter `pmos.debug-shell` à la ligne de
+commande et se connecter en telnet via l'USB (RNDIS, `172.16.42.1`).
+
+### 4. Itérer sur le noyau sans pmbootstrap
+
+```sh
+tools/build-kernel.sh
+# puis fastboot boot avec l'initramfs généré par pmbootstrap
+```
+
+## Firmwares
+
+Une fois booté, `tools/extract-firmware.sh` monte en lecture seule les
+partitions `modem` et `system` et copie dans `/lib/firmware` :
+
+- remoteprocs Qualcomm (`mba.mbn`, `modem.mdt`/`.bXX`, `adsp.*`, `venus.*`),
+  rangés dans `qcom/msm8974/lge/d855/` ;
+- WiFi : `brcm/brcmfmac4339-sdio.bin` et la NVRAM renommée
+  `brcm/brcmfmac4339-sdio.lge,d855.txt` (nom dérivé du compatible du DTS) ;
+- microcode Adreno 330 si nécessaire.
+
+À terme : paquet `firmware-lg-d855` ou `msm-firmware-loader`.
+
+## Feuille de route
+
+1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
+2. Affichage via simple-framebuffer laissé par lk2nd (adresse à relever, voir le `chosen` du DTS).
+3. Driver du panel LGD SIC en double DSI : génération avec
+   [linux-mdss-dsi-panel-driver-generator](https://github.com/msm8916-mainline/linux-mdss-dsi-panel-driver-generator)
+   à partir de `msm8974pro-lge-common/msm8974pro-lge-panel.dtsi`, puis
+   `mdss_dsi0` + `mdss_dsi1` couplés, rétroéclairage LM3697, TPS65132.
+4. GPU, Phosh.
+5. WiFi, batterie, Bluetooth.
+6. Modem (MSS + rmtfs + ModemManager), puis audio.
+7. Upstream du DTS (ajouter son `Signed-off-by` avant l'envoi).
+
+## Remarque sur les révisions matérielles
+
+Le downstream gère des révisions de carte (`evb1` à `rev_12`). Le DTS vise
+les téléphones commerciaux (rev ≥ 1.0) : microSD sur SDHC2, WiFi sur SDHC3,
+chargeur bq24296, LM3697 sur HVLED1+2. Les prototypes `rev_a` et antérieurs
+sont câblés différemment.

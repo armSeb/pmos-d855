@@ -1,0 +1,30 @@
+# Reference: <https://postmarketos.org/devicepkg>
+# Remplace l'ancien port downstream (linux-lg-d855, noyau 3.4).
+pkgname=device-lg-d855
+pkgdesc="LG G3 (International)"
+pkgver=3
+pkgrel=0
+url="https://postmarketos.org"
+license="MIT"
+arch="armv7"
+options="!check !archcheck"
+depends="
+	linux-postmarketos-qcom-msm8974
+	mkbootimg
+	postmarketos-base
+"
+makedepends="devicepkg-dev"
+source="deviceinfo"
+
+build() {
+	devicepkg_build $startdir $pkgname
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+}
+
+# Régénérer avec : pmbootstrap checksum device-lg-d855
+sha512sums="
+91c7790da6a0f6520abd31a217c8d08fc5a62ceecb88637ff17fd1cfd378fb18ea32b1f2da4d59a4ecd1062f52ce27a13f1beb25a73d52b586508945f98faffd  deviceinfo
+"
