@@ -98,11 +98,14 @@ pmos/install-sdcard.sh /dev/sdX        # UI console par défaut ; UI=phosh plus 
 ```
 
 Le script met à jour pmaports, y copie les paquets du dépôt (en retirant
-l'ancien port downstream), construit l'image, vérifie la partition de boot,
-l'écrit sur la carte et agrandit la racine. `REUSE_IMAGE=1` réécrit la
-dernière image sans rien reconstruire.
+l'ancien port downstream), installe directement sur la carte avec
+`pmbootstrap install --sdcard` puis vérifie la partition de boot.
 
 ### 3. Boot sans rien flasher
+
+lk2nd démarre l'Android flashé derrière lui (`fastboot flash boot boot.img`
+depuis lk2nd l'écrit après lui, LineageOS reste donc utilisable). Pour
+rester dans le fastboot de lk2nd, maintenir **Vol−** au démarrage.
 
 ```sh
 fastboot devices                       # lk2nd doit répondre

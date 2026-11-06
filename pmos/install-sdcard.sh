@@ -5,7 +5,6 @@
 #   pmos/install-sdcard.sh /dev/sdX            # UI par défaut : console
 #   UI=phosh pmos/install-sdcard.sh /dev/sdX   # une fois l'affichage fonctionnel
 #   APORTS=~/src/pmaports pmos/install-sdcard.sh /dev/sdX   # clone pmaports ailleurs
-#   REUSE_IMAGE=1 pmos/install-sdcard.sh /dev/sdX   # réécrire la dernière image, sans rien reconstruire
 #
 # Prérequis : pmbootstrap installé, `pmbootstrap init` lancé au moins une fois
 # (n'importe quel appareil : il sert à créer la config et le clone pmaports) ;
@@ -20,10 +19,14 @@
 #   2. met à jour le clone pmaports (origin/main doit exister) ;
 #   3. copie les paquets du dépôt dans pmaports/device/testing (sync.sh) et calcule les sommes ;
 #   4. sélectionne l'appareil et l'UI dans la config pmbootstrap ;
-#   5. pmbootstrap install → image disque ;
-#   6. image : vérifie que la partition de boot contient boot.img, vmlinuz et initramfs ;
-#   7. écrit l'image sur la carte, agrandit la racine à toute la carte ;
-#   8. affiche la commande de démarrage.
+#   5. pmbootstrap install --sdcard : partitionne et remplit directement la carte
+#      (table GPT, pmOS_boot + pmOS_root sur toute la carte) ;
+#   6. vérifie sur la carte que pmOS_boot contient boot.img, vmlinuz et initramfs ;
+#   7. affiche la commande de démarrage.
+#
+# Contrairement à la Maxwell, aucune conversion de table n'est nécessaire (le
+# noyau lit la GPT, lk2nd ne lit pas la carte) : pmbootstrap écrit la carte
+# lui-même.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -58,59 +61,53 @@ read -r answer
 
 work=$(pmbootstrap config work 2>/dev/null) || die "pas de config pmbootstrap : lancer « pmbootstrap init » une fois"
 
-if [ -n "${REUSE_IMAGE:-}" ]; then
-	step "Réutilisation de la dernière image construite (REUSE_IMAGE)"
+# --- 2. pmaports ------------------------------------------------------------
+step "Clone pmaports"
+aports=${APORTS:-$work/cache_git/pmaports}
+[ -d "$aports/.git" ] || die "$aports n'est pas un clone git (pmbootstrap init ?)"
+git -C "$aports" fetch origin || die "git fetch du clone pmaports a échoué ($(git -C "$aports" remote get-url origin))"
+git -C "$aports" rev-parse --verify -q origin/main >/dev/null || \
+	die "origin/main absent dans $aports — branches distantes : $(git -C "$aports" branch -r | tr '\n' ' ')
+     (pmbootstrap et pmaports désaccordés : mettre pmbootstrap à jour, ou recloner pmaports)"
+if [ "$(git -C "$aports" rev-parse --abbrev-ref HEAD)" = main ]; then
+	git -C "$aports" merge -q --ff-only origin/main || \
+		echo "ATTENTION : avance rapide impossible dans $aports (modifications locales ?), on continue"
 else
-	# --- 2. pmaports ------------------------------------------------------------
-	step "Clone pmaports"
-	aports=${APORTS:-$work/cache_git/pmaports}
-	[ -d "$aports/.git" ] || die "$aports n'est pas un clone git (pmbootstrap init ?)"
-	git -C "$aports" fetch origin || die "git fetch du clone pmaports a échoué ($(git -C "$aports" remote get-url origin))"
-	git -C "$aports" rev-parse --verify -q origin/main >/dev/null || \
-		die "origin/main absent dans $aports — branches distantes : $(git -C "$aports" branch -r | tr '\n' ' ')
-	     (pmbootstrap et pmaports désaccordés : mettre pmbootstrap à jour, ou recloner pmaports)"
-	if [ "$(git -C "$aports" rev-parse --abbrev-ref HEAD)" = main ]; then
-		git -C "$aports" merge -q --ff-only origin/main || \
-			echo "ATTENTION : avance rapide impossible dans $aports (modifications locales ?), on continue"
-	else
-		echo "ATTENTION : $aports n'est pas sur main, pas de mise à jour"
-	fi
-
-	# --- 3. paquets -------------------------------------------------------------
-	step "Paquets $device"
-	"$here/sync.sh" "$aports"
-	pmbootstrap checksum "linux-$device" "device-$device"
-
-	# --- 4. config ----------------------------------------------------------------
-	step "Configuration : device=$device, ui=$ui"
-	pmbootstrap config device "$device"
-	pmbootstrap config ui "$ui"
-	# Changer d'UI peut changer de canal (systemd-edge pour phosh) : des chroots
-	# créés pour un autre canal font échouer l'installation. On les supprime
-	# (seulement les chroots : paquets construits et caches conservés).
-	pmbootstrap -y zap
-
-	# --- 5. installation dans une image --------------------------------------
-	step "Installation dans une image (compilation du noyau au premier passage : long)"
-	pmbootstrap install
+	echo "ATTENTION : $aports n'est pas sur main, pas de mise à jour"
 fi
-img="$work/chroot_native/home/pmos/rootfs/$device.img"
-[ -f "$img" ] || die "image introuvable : $img"
-img_size=$(stat -c %s "$img")
-echo "  image : $img ($((img_size / 1024 / 1024)) Mio)"
-[ "$img_size" -le "$size" ] || die "l'image ($img_size o) ne tient pas sur la carte ($size o) : carte plus grande, ou UI plus légère"
 
-# --- 6. vérification de /boot dans l'image ---------------------------------
-# La table GPT de pmbootstrap est conservée : le noyau Linux la lit, et lk2nd
-# ne lit pas la carte (le noyau arrive par USB).
-step "Image : contenu de la partition de boot"
-p1_start=$(sudo sfdisk -d "$img" | sed -n 's/^[^ ]*1 : start= *\([0-9]*\),.*/\1/p')
-[ -n "$p1_start" ] || die "début de p1 introuvable dans l'image"
+# --- 3. paquets -------------------------------------------------------------
+step "Paquets $device"
+"$here/sync.sh" "$aports"
+pmbootstrap checksum "linux-$device" "device-$device"
+
+# --- 4. config ----------------------------------------------------------------
+step "Configuration : device=$device, ui=$ui"
+pmbootstrap config device "$device"
+pmbootstrap config ui "$ui"
+# Changer d'UI peut changer de canal (systemd-edge pour phosh) : des chroots
+# créés pour un autre canal font échouer l'installation. On les supprime
+# (seulement les chroots : paquets construits et caches conservés).
+pmbootstrap -y zap
+
+# --- 5. installation sur la carte --------------------------------------------
+step "Installation sur $dev (compilation du noyau au premier passage : long)"
+if lsblk -no MOUNTPOINT "$dev" | grep -q .; then
+	die "une partition de $dev a été montée entre-temps, la démonter puis relancer"
+fi
+pmbootstrap -y install --sdcard="$dev"
+sync
+
+# --- 6. vérification de la partition de boot --------------------------------
+step "Carte : contenu de pmOS_boot"
+if command -v partprobe >/dev/null; then sudo partprobe "$dev" 2>/dev/null || true; fi
+sleep 2
+bootp=$(lsblk -lnpo NAME,LABEL "$dev" | awk '$2 == "pmOS_boot" { print $1 }')
+[ -n "$bootp" ] || die "aucune partition pmOS_boot sur $dev"
 mnt=$(mktemp -d)
 cleanup() { sudo umount "$mnt" 2>/dev/null || true; rmdir "$mnt" 2>/dev/null || true; }
 trap cleanup EXIT
-sudo mount -o ro,loop,offset=$((p1_start * 512)) "$img" "$mnt"
-echo "  p1 : $(findmnt -no FSTYPE "$mnt"), commence au secteur $p1_start"
+sudo mount -o ro "$bootp" "$mnt"
 ok=1
 for f in boot.img vmlinuz initramfs; do
 	if [ -s "$mnt/$f" ]; then
@@ -121,41 +118,15 @@ for f in boot.img vmlinuz initramfs; do
 done
 cleanup
 trap - EXIT
-[ "$ok" = 1 ] || die "la partition de boot est incomplète (carte non écrite)"
-
-# --- 7. écriture sur la carte -----------------------------------------------
-step "Écriture sur $dev"
-if lsblk -no MOUNTPOINT "$dev" | grep -q .; then
-	die "une partition de $dev a été montée entre-temps, la démonter puis relancer"
-fi
-sudo dd if="$img" of="$dev" bs=4M conv=fsync status=progress
-sync
-if command -v partprobe >/dev/null; then sudo partprobe "$dev" 2>/dev/null || true; fi
-
-step "Agrandissement de la racine (p2) à toute la carte"
-case "$dev" in
-	*[0-9]) p2="${dev}p2" ;;	# /dev/mmcblk0 → /dev/mmcblk0p2
-	*) p2="${dev}2" ;;
-esac
-# GPT : déplacer l'en-tête de secours en fin de carte avant d'agrandir
-if [ "$(sudo blkid -p -o value -s PTTYPE "$dev")" = gpt ]; then
-	sudo sgdisk -e "$dev" >/dev/null
-fi
-echo ', +' | sudo sfdisk -q --no-reread -N 2 "$dev"
-if command -v partprobe >/dev/null; then sudo partprobe "$dev" 2>/dev/null || true; fi
-sudo partx -u "$dev" 2>/dev/null || true
-sleep 2
-[ -b "$p2" ] || die "$p2 introuvable"
-rc=0; sudo e2fsck -f -p "$p2" || rc=$?
-[ "$rc" -le 1 ] || die "e2fsck sur $p2 a échoué (code $rc)"
-sudo resize2fs "$p2"
+[ "$ok" = 1 ] || die "pmOS_boot est incomplète"
 sudo sfdisk -l "$dev" | sed -n '/^Device/,$p'
 
-# --- 8. démarrage -----------------------------------------------------------
+# --- 7. démarrage -----------------------------------------------------------
 step "Carte prête"
 cat <<'EOF'
-1. Insérer la carte dans le G3, le démarrer : lk2nd attend en mode fastboot
-   (écran noir possible). Vérifier côté PC : fastboot devices
+1. Insérer la carte dans le G3, le démarrer en maintenant Vol− : lk2nd reste
+   en fastboot (sinon il démarre l'Android flashé derrière lui).
+   Vérifier côté PC : fastboot devices
 2. Envoyer le noyau, sans rien flasher :
      pmbootstrap flasher boot
 3. Réseau USB : ssh user@172.16.42.1
