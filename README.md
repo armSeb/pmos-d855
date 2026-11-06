@@ -66,19 +66,23 @@ L'aboot LG refuse toute image non signée (« Secure booting error ») sauf si
 elle est « bumpée ». Le script télécharge lk2nd, le bumpe, sauvegarde la
 partition boot actuelle dans `backups/`, l'écrit et relit pour vérifier.
 
-Par défaut il passe par le **mode Download** LG, avec
-[LGLAF](https://github.com/Lekensteyn/lglaf) (développé sur D855) :
+Le script détecte comment le téléphone est connecté, dans cet ordre :
+
+- **fastboot** : l'aboot LG passe en fastboot quand la partition `boot` est
+  invalide (par exemple après un premier essai non bumpé). Le script flashe
+  alors directement lk2nd bumpé dans `boot`, redémarre et attend que lk2nd
+  réponde. Sous lk2nd, il met à jour la partition `lk2nd`. Pas de sauvegarde
+  possible par ce chemin.
+- **mode Download** (éteint, Vol+ en branchant l'USB), via
+  [LGLAF](https://github.com/Lekensteyn/lglaf), avec sauvegarde de `boot`
+  dans `backups/` et relecture. Prérequis : `python3-usb python3-cryptography`.
+- **TWRP** (adb), avec sauvegarde et relecture.
 
 ```sh
-sudo apt install python3-usb python3-cryptography
-# téléphone éteint (batterie retirée/remise), maintenir Vol+ et brancher l'USB
-tools/flash-lk2nd.sh
-fastboot devices                       # après redémarrage : lk2nd répond (écran noir possible)
+tools/flash-lk2nd.sh                   # ou METHOD=fastboot|download|twrp
+fastboot getvar all | grep -i lk2nd    # lk2nd répond (écran noir possible)
 ```
 
-Si LGLAF n'a pas accès à l'USB, le script donne la règle udev à installer.
-L'aboot stock du G3 n'a pas de fastboot : `METHOD=fastboot` ne sert qu'à
-mettre à jour un lk2nd qui démarre déjà. `METHOD=twrp` passe par adb.
 Autres variantes : `NO_FLASH=1`, `LK2ND_IMG=…`, `LK2ND_VERSION=…`.
 Le bump seul : `tools/lg-bump.py lk2nd.img`.
 

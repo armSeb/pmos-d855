@@ -1,31 +1,31 @@
 #!/bin/sh
 # Télécharge lk2nd-msm8974, le « bumpe » pour l'aboot LG et le flashe dans la
-# partition boot du G3, avec sauvegarde et vérification par relecture.
+# partition boot du G3 (sauvegarde et relecture en mode Download et TWRP).
 #
-#   tools/flash-lk2nd.sh                    # dernière release, mode Download (défaut)
-#   METHOD=fastboot tools/flash-lk2nd.sh    # mise à jour quand lk2nd tourne déjà
-#   METHOD=twrp tools/flash-lk2nd.sh        # depuis TWRP (adb)
+#   tools/flash-lk2nd.sh                    # dernière release, méthode détectée
+#   METHOD=fastboot|download|twrp tools/flash-lk2nd.sh   # méthode imposée
 #   LK2ND_VERSION=21.0 tools/flash-lk2nd.sh # release donnée (tag GitHub)
 #   LK2ND_IMG=mon-lk2nd.img tools/flash-lk2nd.sh   # image locale (build perso)
 #   NO_FLASH=1 tools/flash-lk2nd.sh         # télécharge + bumpe seulement
 #
-# Méthodes :
+# Méthodes (auto : la première qui voit le téléphone, dans cet ordre) :
+#   fastboot : flash direct dans boot. L'aboot LG passe en fastboot quand la
+#              partition boot est invalide ; sous lk2nd, met à jour lk2nd.
+#              Pas de sauvegarde ni de relecture possibles par fastboot.
 #   download : mode Download LG (éteint, Vol+ en branchant l'USB), via LGLAF
 #              (github.com/Lekensteyn/lglaf, développé sur D855), cloné dans
 #              build/lglaf. Prérequis : python3-usb (pyusb), python3-cryptography,
 #              règle udev 1004:633e (le script l'indique si l'accès échoue).
-#   fastboot : le fastboot de lk2nd. L'aboot LG stock du G3 n'a pas de fastboot,
-#              donc seulement pour mettre à jour un lk2nd qui démarre déjà.
 #   twrp     : adb depuis TWRP (Vol− + Power, voir README).
 #
 # Le bump ne fonctionne qu'avec un aboot vulnérable (celui qui accepte déjà
-# TWRP et les ROM custom). Sinon : « Secure booting error » au démarrage, et
-# retour à TWRP pour restaurer la sauvegarde faite ici.
+# TWRP et les ROM custom). Sinon : « Secure booting error » au démarrage ;
+# restaurer alors la sauvegarde (mode Download ou TWRP) ou un boot.img d'origine.
 set -eu
 
 top=$(cd "$(dirname "$0")/.." && pwd)
 out="$top/out/lk2nd"
-method=${METHOD:-download}
+method=${METHOD:-auto}
 lglaf_commit=7eeac45d2258df5e7eb20916781a62bc728b00d3
 
 die() { echo "ERREUR : $*" >&2; exit 1; }
@@ -72,16 +72,62 @@ if [ -n "${NO_FLASH:-}" ]; then
 	exit 0
 fi
 
-# --- 4a. mise à jour depuis lk2nd ---------------------------------------------
+# --- 4. choix automatique de la méthode -------------------------------------
+if [ "$method" = auto ]; then
+	if command -v fastboot >/dev/null && fastboot devices 2>/dev/null | grep -q .; then
+		method=fastboot
+	elif command -v lsusb >/dev/null && lsusb -d 1004: >/dev/null 2>&1; then
+		method=download
+	elif command -v adb >/dev/null && [ "$(adb get-state 2>/dev/null)" = recovery ]; then
+		method=twrp
+	else
+		die "téléphone introuvable : fastboot (aboot LG ou lk2nd), mode Download (Vol+ + USB) ou TWRP"
+	fi
+	echo "  méthode : $method"
+fi
+
+# --- 4a. fastboot (aboot LG ou lk2nd) ----------------------------------------
+# L'aboot LG passe en fastboot quand la partition boot est invalide ; lk2nd
+# expose aussi fastboot. Les deux répondent en 18d1:d00d. Sous lk2nd on écrit
+# la partition « lk2nd » (lk2nd se met à jour lui-même), sinon « boot ».
 if [ "$method" = fastboot ]; then
 	command -v fastboot >/dev/null || die "fastboot introuvable"
-	step "Mise à jour via le fastboot de lk2nd"
-	fastboot devices | grep -q . || die "aucun appareil fastboot (lk2nd démarré ?)"
-	printf 'Flasher %s dans la partition lk2nd ? [o/N] ' "$bumped"
-	read -r ok; [ "$ok" = o ] || die "annulé"
-	fastboot flash lk2nd "$bumped"
+	step "Téléphone en fastboot"
+	fastboot devices | grep -q . || die "aucun appareil fastboot"
+	product=$(fastboot getvar product 2>&1 | sed -n 's/^product: *//p')
+	if fastboot getvar all 2>&1 | grep -qi lk2nd; then
+		part=lk2nd; who="lk2nd"
+	else
+		part=boot; who="bootloader LG"
+	fi
+	echo "  $who, produit : ${product:-inconnu}"
+	case "$product" in
+		*G3*|*g3*|*d855*|*D855*|*8974*) ;;
+		*) printf 'ATTENTION : produit non reconnu comme un G3. Continuer ? [o/N] '
+		   read -r ok; [ "$ok" = o ] || die "annulé" ;;
+	esac
+	if [ "$part" = boot ]; then
+		echo "  pas de relecture possible en fastboot : garder une sauvegarde de boot ailleurs"
+	fi
+	printf 'Flasher %s dans la partition %s ? [o/N] ' "$(basename "$bumped")" "$part"
+	read -r ok; [ "$ok" = o ] || die "annulé (rien n'a été écrit)"
+	fastboot flash "$part" "$bumped"
 	fastboot reboot
-	exit 0
+
+	step "Contrôle après redémarrage"
+	echo "  attente du fastboot de lk2nd (30 s max)…"
+	i=0
+	while [ $i -lt 30 ]; do
+		if fastboot getvar all 2>&1 | grep -qi lk2nd; then
+			echo "  OK : lk2nd répond"
+			exit 0
+		fi
+		sleep 1; i=$((i + 1))
+	done
+	echo "  lk2nd ne répond pas. Si le bootloader LG revient en fastboot ou affiche"
+	echo "  « Secure booting error », le bump a été refusé : essayer METHOD=download"
+	echo "  ou restaurer un boot.img d'origine (fastboot flash boot boot.img)."
+	exit 1
 fi
 
 # --- 4b. mode Download (LGLAF) -------------------------------------------------
