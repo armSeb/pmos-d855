@@ -1,7 +1,8 @@
 # postmarketOS mainline pour LG G3 (D855)
 
 Portage de postmarketOS sur le LG G3 international (D855, Snapdragon 801 /
-MSM8974AC) avec le noyau **mainline** (`linux-postmarketos-qcom-msm8974`) au
+MSM8974AC) avec un noyau **mainline** (fork
+[msm8974-mainline/linux](https://github.com/msm8974-mainline/linux), 6.16) au
 lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 
 ## Contenu du dépôt
@@ -9,9 +10,10 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 | Chemin | Rôle |
 |---|---|
 | `dts/qcom-msm8974pro-lge-d855.dts` | Device tree mainline (source de référence) |
-| `kernel/0001-…-D855.patch` | Le même DTS + entrée Makefile, au format patch pour le fork [msm8974-mainline/linux](https://github.com/msm8974-mainline/linux) (`qcom-msm8974-6.16.y`) |
-| `pmaports/device/testing/device-lg-d855/` | Paquet appareil pmOS (deviceinfo + APKBUILD) |
-| `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap |
+| `pmos/install-sdcard.sh` | **Construit et écrit une microSD démarrable** (procédure complète) |
+| `pmos/linux-lg-d855/`, `pmos/device-lg-d855/` | Paquets pmOS : noyau épinglé + config, deviceinfo |
+| `pmos/sync.sh`, `pmos/make-config.sh` | Copie des paquets dans pmaports, régénération de la config noyau ([détails](pmos/README.md)) |
+| `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap (`DTB_ONLY=1` pour le DTB seul) |
 | `tools/extract-firmware.sh` | Copie des firmwares depuis les partitions Android (à lancer sur le téléphone) |
 
 ## État du DTS
@@ -64,37 +66,35 @@ appareils supportés), puis le flasher dans `boot`. Les bootloaders LG
 exigent une image « bumpée » : suivre la doc lk2nd pour le G3.
 Ensuite, le téléphone démarre sur l'écran fastboot de lk2nd.
 
-### 2. pmbootstrap avec ce dépôt
+### 2. Carte microSD
 
 ```sh
-pmbootstrap init                       # appareil : lg-d855, UI : console d'abord
-# copier le paquet appareil dans pmaports (remplace le port downstream)
-cp -r pmaports/device/testing/device-lg-d855 "$(pmbootstrap config aports)/device/testing/"
-# ajouter le patch DTS au noyau (vérifier l'emplacement du paquet dans pmaports)
-cp kernel/0001-*.patch "$(pmbootstrap config aports)/device/community/linux-postmarketos-qcom-msm8974/"
-#   puis l'ajouter à source= dans son APKBUILD et lancer :
-pmbootstrap checksum linux-postmarketos-qcom-msm8974
-pmbootstrap install --sdcard=/dev/sdX  # rootfs sur la microSD
+pmbootstrap init                       # une fois, n'importe quel appareil
+pmos/install-sdcard.sh /dev/sdX        # UI console par défaut ; UI=phosh plus tard
 ```
 
-> L'ancien `device-lg-d855` downstream existe déjà dans pmaports : vérifier
-> son emplacement exact et retirer l'un des deux.
+Le script met à jour pmaports, y copie les paquets du dépôt (en retirant
+l'ancien port downstream), construit l'image, vérifie la partition de boot,
+l'écrit sur la carte et agrandit la racine. `REUSE_IMAGE=1` réécrit la
+dernière image sans rien reconstruire.
 
 ### 3. Boot sans rien flasher
 
 ```sh
-pmbootstrap flasher boot               # envoie boot.img (noyau + initramfs) via fastboot
+fastboot devices                       # lk2nd doit répondre
+pmbootstrap flasher boot               # envoie boot.img (noyau + initramfs)
+ssh user@172.16.42.1
 ```
 
 L'initramfs trouve `pmOS_root` par son label, sur la microSD.
-Si le boot échoue avant le rootfs, ajouter `pmos.debug-shell` à la ligne de
-commande et se connecter en telnet via l'USB (RNDIS, `172.16.42.1`).
+Si le boot échoue avant le rootfs :
+`pmbootstrap flasher boot --cmdline pmos.debug-shell`, puis `telnet 172.16.42.1`.
 
-### 4. Itérer sur le noyau sans pmbootstrap
+### 4. Itérer sur le DTS
 
 ```sh
-tools/build-kernel.sh
-# puis fastboot boot avec l'initramfs généré par pmbootstrap
+DTB_ONLY=1 tools/build-kernel.sh       # vérifie le DTS en quelques secondes
+tools/build-kernel.sh                  # zImage + DTB dans out/
 ```
 
 ## Firmwares
@@ -121,7 +121,7 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 4. GPU, Phosh.
 5. WiFi, batterie, Bluetooth.
 6. Modem (MSS + rmtfs + ModemManager), puis audio.
-7. Upstream du DTS (ajouter son `Signed-off-by` avant l'envoi).
+7. Upstream du DTS dans le fork msm8974-mainline puis dans Linux (ajouter son `Signed-off-by` avant l'envoi).
 
 ## Remarque sur les révisions matérielles
 

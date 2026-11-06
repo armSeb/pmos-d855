@@ -1,5 +1,5 @@
 # Reference: https://wiki.postmarketos.org/wiki/Deviceinfo_reference
-# Port mainline (linux-postmarketos-qcom-msm8974) démarré via lk2nd.
+# Port mainline (linux-lg-d855, fork msm8974-mainline) démarré via lk2nd.
 # Les offsets sont ceux de lk2nd-msm8974 ; à recouper avec device-oneplus-bacon.
 
 deviceinfo_format_version="0"
@@ -7,7 +7,8 @@ deviceinfo_name="LG G3 (International)"
 deviceinfo_manufacturer="LG"
 deviceinfo_codename="lg-d855"
 deviceinfo_year="2014"
-deviceinfo_dtb="qcom-msm8974pro-lge-d855"
+# chemin relatif à /boot/dtbs (dtbs_install range les DTB par fabricant)
+deviceinfo_dtb="qcom/qcom-msm8974pro-lge-d855"
 deviceinfo_arch="armv7"
 
 # Device related

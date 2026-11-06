@@ -1,0 +1,76 @@
+# Reference: <https://postmarketos.org/vendorkernel>
+# Noyau mainline pour le LG G3 (D855) : fork msm8974-mainline, épinglé sur un
+# commit, + le DTS de ce dépôt. Remplace l'ancien noyau downstream 3.4.
+# Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
+pkgname=linux-lg-d855
+pkgver=6.16.12
+pkgrel=0
+pkgdesc="LG G3 (D855) mainline kernel"
+arch="armv7"
+_carch="arm"
+_flavor="lg-d855"
+url="https://github.com/msm8974-mainline/linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps pmb:cross-native pmb:kconfigcheck-community"
+makedepends="
+	bash
+	bc
+	bison
+	devicepkg-dev
+	findutils
+	flex
+	gmp-dev
+	installkernel
+	linux-headers
+	mpc1-dev
+	mpfr-dev
+	openssl-dev
+	perl
+	postmarketos-installkernel
+	python3
+	xz
+	"
+
+# Branche qcom-msm8974-6.16.y ; mettre à jour avec pmos/make-config.sh
+_commit="888dd19735240b640f925a6da4affc082c5c48a9"
+_config="config-$_flavor.$arch"
+_dtb="qcom-msm8974pro-lge-d855"
+source="
+	linux-$_commit.tar.gz::https://github.com/msm8974-mainline/linux/archive/$_commit.tar.gz
+	$_config
+	$_dtb.dts
+	"
+builddir="$srcdir/linux-$_commit"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/$_dtb.dts" arch/arm/boot/dts/qcom/
+	grep -q "$_dtb.dtb" arch/arm/boot/dts/qcom/Makefile || \
+		echo "dtb-\$(CONFIG_ARCH_QCOM) += $_dtb.dtb" >> arch/arm/boot/dts/qcom/Makefile
+	cp "$srcdir/$_config" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" CC="${CC:-gcc}" \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1))-postmarketOS" \
+		zImage modules dtbs
+}
+
+package() {
+	mkdir -p "$pkgdir/boot"
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" \
+		INSTALL_PATH="$pkgdir/boot" \
+		INSTALL_MOD_PATH="$pkgdir" \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir/boot/dtbs"
+	rm -f "$pkgdir"/lib/modules/*/build "$pkgdir"/lib/modules/*/source
+
+	install -D "$builddir/include/config/kernel.release" \
+		"$pkgdir/usr/share/kernel/$_flavor/kernel.release"
+}
+
+# Sommes générées par : pmbootstrap checksum linux-lg-d855
+# (pmos/sync.sh recopie le DTS depuis le dépôt avant)
+sha512sums=""
