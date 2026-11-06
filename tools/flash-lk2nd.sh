@@ -1,17 +1,22 @@
 #!/bin/sh
 # Télécharge lk2nd-msm8974, le « bumpe » pour l'aboot LG et le flashe dans la
-# partition boot du G3 depuis TWRP (adb), avec sauvegarde et vérification.
+# partition boot du G3, avec sauvegarde et vérification par relecture.
 #
-#   tools/flash-lk2nd.sh                    # dernière release, flash via TWRP
+#   tools/flash-lk2nd.sh                    # dernière release, mode Download (défaut)
+#   METHOD=fastboot tools/flash-lk2nd.sh    # mise à jour quand lk2nd tourne déjà
+#   METHOD=twrp tools/flash-lk2nd.sh        # depuis TWRP (adb)
 #   LK2ND_VERSION=21.0 tools/flash-lk2nd.sh # release donnée (tag GitHub)
 #   LK2ND_IMG=mon-lk2nd.img tools/flash-lk2nd.sh   # image locale (build perso)
 #   NO_FLASH=1 tools/flash-lk2nd.sh         # télécharge + bumpe seulement
-#   METHOD=fastboot tools/flash-lk2nd.sh    # mise à jour quand lk2nd tourne déjà
 #
-# Prérequis : curl, python3, adb (et fastboot pour METHOD=fastboot).
-# Le téléphone doit être dans TWRP (Vol− + Power, voir README), sauf en
-# METHOD=fastboot. Le G3 stock n'a pas de fastboot : avant lk2nd, seul TWRP
-# permet d'écrire la partition boot.
+# Méthodes :
+#   download : mode Download LG (éteint, Vol+ en branchant l'USB), via LGLAF
+#              (github.com/Lekensteyn/lglaf, développé sur D855), cloné dans
+#              build/lglaf. Prérequis : python3-usb (pyusb), python3-cryptography,
+#              règle udev 1004:633e (le script l'indique si l'accès échoue).
+#   fastboot : le fastboot de lk2nd. L'aboot LG stock du G3 n'a pas de fastboot,
+#              donc seulement pour mettre à jour un lk2nd qui démarre déjà.
+#   twrp     : adb depuis TWRP (Vol− + Power, voir README).
 #
 # Le bump ne fonctionne qu'avec un aboot vulnérable (celui qui accepte déjà
 # TWRP et les ROM custom). Sinon : « Secure booting error » au démarrage, et
@@ -20,7 +25,8 @@ set -eu
 
 top=$(cd "$(dirname "$0")/.." && pwd)
 out="$top/out/lk2nd"
-method=${METHOD:-twrp}
+method=${METHOD:-download}
+lglaf_commit=7eeac45d2258df5e7eb20916781a62bc728b00d3
 
 die() { echo "ERREUR : $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -78,7 +84,68 @@ if [ "$method" = fastboot ]; then
 	exit 0
 fi
 
-# --- 4b. premier flash depuis TWRP --------------------------------------------
+# --- 4b. mode Download (LGLAF) -------------------------------------------------
+if [ "$method" = download ]; then
+	lglaf="$top/build/lglaf"
+	step "LGLAF"
+	if [ ! -f "$lglaf/partitions.py" ]; then
+		git init -q "$lglaf"
+		git -C "$lglaf" remote add origin https://github.com/Lekensteyn/lglaf
+		git -C "$lglaf" fetch -q --depth 1 origin "$lglaf_commit"
+		git -C "$lglaf" checkout -q --detach FETCH_HEAD
+	fi
+	python3 -c 'import usb.core, cryptography' 2>/dev/null || \
+		die "modules Python manquants : apt install python3-usb python3-cryptography (ou pip install pyusb cryptography)"
+	laf() { (cd "$lglaf" && python3 "$@"); }
+
+	step "Téléphone en mode Download"
+	if command -v lsusb >/dev/null && ! lsusb -d 1004: >/dev/null 2>&1; then
+		die "aucun appareil LG en USB. Éteindre (batterie), maintenir Vol+ et brancher l'USB, attendre « Firmware Update »"
+	fi
+	laf partitions.py --list boot || die "LGLAF ne parle pas au téléphone. Accès USB : sudo cp $lglaf/rules.d/42-usb-lglaf.rules /etc/udev/rules.d/ && sudo udevadm control --reload, puis rebrancher"
+
+	step "Sauvegarde de la partition boot actuelle"
+	bak="$top/backups/boot-$(date +%Y%m%d-%H%M%S).img"
+	laf partitions.py --dump "$bak" boot
+	[ -s "$bak" ] || die "sauvegarde vide, abandon"
+	echo "  $bak ($(wc -c < "$bak") octets)"
+
+	printf '\nÉcrire lk2nd bumpé dans la partition boot ? [o/N] '
+	read -r ok; [ "$ok" = o ] || die "annulé (rien n'a été écrit)"
+
+	step "Écriture"
+	laf partitions.py --restore "$bumped" boot
+
+	step "Vérification (relecture)"
+	check="$out/boot-readback.img"
+	laf partitions.py --dump "$check" boot
+	got=$(head -c "$size" "$check" | sha256sum | cut -d' ' -f1)
+	rm -f "$check"
+	if [ "$got" != "$sha" ]; then
+		echo "ÉCHEC : la partition ne correspond pas à l'image." >&2
+		echo "Restaurer : (cd $lglaf && python3 partitions.py --restore $bak boot)" >&2
+		exit 1
+	fi
+	echo "  OK, contenu identique"
+
+	printf '\nRedémarrer le téléphone maintenant ? [o/N] '
+	read -r ok
+	if [ "$ok" = o ]; then laf lglaf.py -c '!CTRL RSET' >/dev/null 2>&1 || true; fi
+	cat <<EOF
+
+lk2nd est flashé. Sauvegarde de l'ancienne partition boot : $bak
+
+  fastboot devices        # lk2nd doit répondre (écran noir possible)
+
+Si « Secure booting error » : mode Download (éteint, Vol+ + USB), puis
+  (cd $lglaf && python3 partitions.py --restore $bak boot)
+EOF
+	exit 0
+fi
+
+[ "$method" = twrp ] || die "METHOD inconnue : $method (download, fastboot ou twrp)"
+
+# --- 4c. premier flash depuis TWRP --------------------------------------------
 command -v adb >/dev/null || die "adb introuvable"
 step "Téléphone"
 state=$(adb get-state 2>/dev/null || true)

@@ -13,7 +13,7 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 | `pmos/install-sdcard.sh` | **Construit et écrit une microSD démarrable** (procédure complète) |
 | `pmos/linux-lg-d855/`, `pmos/device-lg-d855/` | Paquets pmOS : noyau épinglé + config, deviceinfo |
 | `pmos/sync.sh`, `pmos/make-config.sh` | Copie des paquets dans pmaports, régénération de la config noyau ([détails](pmos/README.md)) |
-| `tools/flash-lk2nd.sh`, `tools/lg-bump.py` | Téléchargement, bump LG et flash de lk2nd depuis TWRP |
+| `tools/flash-lk2nd.sh`, `tools/lg-bump.py` | Téléchargement, bump LG et flash de lk2nd (mode Download, fastboot ou TWRP) |
 | `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap (`DTB_ONLY=1` pour le DTB seul) |
 | `tools/extract-firmware.sh` | Copie des firmwares depuis les partitions Android (à lancer sur le téléphone) |
 
@@ -64,18 +64,22 @@ adb pull /sdcard/boot.img /sdcard/recovery.img .
 
 L'aboot LG refuse toute image non signée (« Secure booting error ») sauf si
 elle est « bumpée ». Le script télécharge lk2nd, le bumpe, sauvegarde la
-partition boot actuelle dans `backups/`, l'écrit depuis TWRP et relit pour
-vérifier :
+partition boot actuelle dans `backups/`, l'écrit et relit pour vérifier.
+
+Par défaut il passe par le **mode Download** LG, avec
+[LGLAF](https://github.com/Lekensteyn/lglaf) (développé sur D855) :
 
 ```sh
-# téléphone dans TWRP : Vol− + Power, relâcher/rappuyer Power au logo LG
+sudo apt install python3-usb python3-cryptography
+# téléphone éteint (batterie retirée/remise), maintenir Vol+ et brancher l'USB
 tools/flash-lk2nd.sh
-adb reboot
-fastboot devices                       # lk2nd répond (écran noir possible)
+fastboot devices                       # après redémarrage : lk2nd répond (écran noir possible)
 ```
 
-Variantes : `NO_FLASH=1` (télécharge et bumpe seulement), `LK2ND_IMG=…`
-(image locale), `METHOD=fastboot` (mise à jour quand lk2nd tourne déjà).
+Si LGLAF n'a pas accès à l'USB, le script donne la règle udev à installer.
+L'aboot stock du G3 n'a pas de fastboot : `METHOD=fastboot` ne sert qu'à
+mettre à jour un lk2nd qui démarre déjà. `METHOD=twrp` passe par adb.
+Autres variantes : `NO_FLASH=1`, `LK2ND_IMG=…`, `LK2ND_VERSION=…`.
 Le bump seul : `tools/lg-bump.py lk2nd.img`.
 
 ### 2. Carte microSD
