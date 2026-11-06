@@ -20,7 +20,11 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 ## État du DTS
 
 Le squelette compile proprement contre le fork 6.16 (aucun avertissement
-propre au fichier). **Rien n'a encore été testé sur le matériel.**
+propre au fichier).
+
+Testé sur le matériel : lk2nd bumpé flashé dans `boot` par
+`tools/flash-lk2nd.sh` (méthode fastboot depuis l'aboot LG) démarre
+directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 
 | Bloc | Composant | Dans le DTS | Driver mainline |
 |---|---|---|---|
@@ -132,6 +136,7 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 
 ## Feuille de route
 
+0. lk2nd bumpé démarre. ✓
 1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
 2. Affichage via simple-framebuffer laissé par lk2nd (adresse à relever, voir le `chosen` du DTS).
 3. Driver du panel LGD SIC en double DSI : génération avec
