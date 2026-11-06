@@ -7,8 +7,8 @@ deviceinfo_name="LG G3 (International)"
 deviceinfo_manufacturer="LG"
 deviceinfo_codename="lg-d855"
 deviceinfo_year="2014"
-# chemin relatif à /boot/dtbs (dtbs_install range les DTB par fabricant)
-deviceinfo_dtb="qcom/qcom-msm8974pro-lge-d855"
+# sur ARM, dtbs_install installe les DTB à plat dans /boot/dtbs (ARCH_WANT_FLAT_DTB_INSTALL)
+deviceinfo_dtb="qcom-msm8974pro-lge-d855"
 deviceinfo_arch="armv7"
 
 # Device related
