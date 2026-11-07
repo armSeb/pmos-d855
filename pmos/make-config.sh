@@ -1,6 +1,7 @@
 #!/bin/sh
 # Régénère pmos/linux-lg-d855/config-lg-d855.armv7 :
-#   msm8974_defconfig (du fork, au commit épinglé dans l'APKBUILD) + lg-d855.fragment
+#   msm8974_defconfig (du fork, au commit épinglé dans l'APKBUILD, patches du
+#   paquet appliqués) + lg-d855.fragment
 #
 #   pmos/make-config.sh              → clone le fork dans build/linux si besoin
 #   pmos/make-config.sh ~/src/linux  → utilise un arbre existant (même commit !)
@@ -23,6 +24,19 @@ if [ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
 	git -C "$src" fetch -q --depth 1 origin "$commit"
 	git -C "$src" checkout -q --detach FETCH_HEAD
 fi
+
+# Patches du paquet (certains ajoutent des options Kconfig) : appliqués dans
+# l'arbre de travail s'ils ne le sont pas déjà
+for p in "$k"/*.patch; do
+	[ -e "$p" ] || continue
+	if git -C "$src" apply --check "$p" 2>/dev/null; then
+		git -C "$src" apply "$p"
+	elif git -C "$src" apply -R --check "$p" 2>/dev/null; then
+		:	# déjà appliqué
+	else
+		echo "le patch $(basename "$p") ne s'applique pas sur $src" >&2; exit 1
+	fi
+done
 
 cd "$src"
 ARCH=arm ./scripts/kconfig/merge_config.sh -m \

@@ -14,6 +14,7 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 | `pmos/linux-lg-d855/`, `pmos/device-lg-d855/` | Paquets pmOS : noyau épinglé + config, deviceinfo |
 | `pmos/sync.sh`, `pmos/make-config.sh` | Copie des paquets dans pmaports, régénération de la config noyau ([détails](pmos/README.md)) |
 | `tools/flash-lk2nd.sh`, `tools/lg-bump.py` | Téléchargement, bump LG et flash de lk2nd (mode Download, fastboot ou TWRP) |
+| `tools/mdp-dump.sh` | Relève le framebuffer du bootloader (registres MDP5), à lancer sur le téléphone |
 | `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap (`DTB_ONLY=1` pour le DTB seul) |
 | `tools/extract-firmware.sh` | Copie des firmwares depuis les partitions Android (à lancer sur le téléphone) |
 
@@ -38,7 +39,7 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 | WiFi | BCM4339 sur SDHC3, REG_ON TLMM 69, host-wake TLMM 44 | activé | oui (`brcmfmac`, firmware requis) |
 | Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
-| Panel | LGD SIC 1440p, vidéo, **double DSI** | absent | **à écrire** |
+| Panel | LGD SIC 1440p, vidéo, **double DSI** | décrit, désactivé | driver écrit (patch 0002) ; **MDP5 ne gère pas le DSI couplé** |
 | GPU | Adreno 330 | désactivé (attend le panel) | oui (freedreno) |
 | Bluetooth | BCM4339, BLSP1 UART5 | absent | nœud UART à ajouter |
 | Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
@@ -117,7 +118,15 @@ L'initramfs trouve `pmOS_root` par son label, sur la microSD.
 Si le boot échoue avant le rootfs :
 `pmbootstrap flasher boot --cmdline pmos.debug-shell`, puis `telnet 172.16.42.1`.
 
-### 4. Itérer sur le DTS
+### 4. Relever le framebuffer du bootloader
+
+Dans le shell de debug ou en SSH, écran encore allumé par le bootloader :
+
+```sh
+sh mdp-dump.sh      # copié depuis tools/ (scp, ou wget depuis le PC)
+```
+
+### 5. Itérer sur le DTS
 
 ```sh
 DTB_ONLY=1 tools/build-kernel.sh       # vérifie le DTS en quelques secondes
@@ -141,11 +150,16 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 
 0. lk2nd bumpé démarre. ✓
 1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
-2. Affichage via simple-framebuffer laissé par lk2nd (adresse à relever, voir le `chosen` du DTS).
-3. Driver du panel LGD SIC en double DSI : génération avec
-   [linux-mdss-dsi-panel-driver-generator](https://github.com/msm8916-mainline/linux-mdss-dsi-panel-driver-generator)
-   à partir de `msm8974pro-lge-common/msm8974pro-lge-panel.dtsi`, puis
-   `mdss_dsi0` + `mdss_dsi1` couplés, rétroéclairage LM3697, TPS65132.
+2. Affichage via le framebuffer laissé par le bootloader (simple-framebuffer +
+   simpledrm) : lancer `tools/mdp-dump.sh` sur le téléphone, reporter
+   adresse, taille, stride et format dans `chosen` du DTS. ← **prochaine étape**
+3. Affichage natif. Le driver du panel est écrit
+   (`pmos/linux-lg-d855/0002-…patch`, compatible `lge,g3-panel-lgd-sic`)
+   et le DTS décrit DSI0 + DSI1 couplés, le rétroéclairage LM3697 et le
+   TPS65132, mais tout reste désactivé : le driver MDP5 mainline de la
+   MSM8974 ne sait pas piloter deux interfaces DSI couplées (seul le côté
+   DSI le gère, et DPU ne prend pas en charge la MSM8974). Il faudra
+   ajouter ce support à MDP5 avant de pouvoir l'activer.
 4. GPU, Phosh.
 5. WiFi, batterie, Bluetooth.
 6. Modem (MSS + rmtfs + ModemManager), puis audio.

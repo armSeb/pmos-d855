@@ -52,3 +52,8 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_LED=m
 # Alimentation +/- du panel
 CONFIG_REGULATOR_TPS65132=m
+# Panel LGD SIC double DSI (patch 0002) ; inutilisé tant que MDP5 ne gère
+# pas le DSI couplé
+CONFIG_DRM_PANEL_LGE_G3_LGD_SIC=m
+# Affichage via le framebuffer du bootloader (simple-framebuffer)
+CONFIG_DRM_SIMPLEDRM=y

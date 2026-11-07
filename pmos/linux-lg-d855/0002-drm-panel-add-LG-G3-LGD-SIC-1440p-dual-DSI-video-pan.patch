@@ -1,0 +1,422 @@
+From c8f75ab0694a3bfce7349e4dd7dd6c6d7d231f52 Mon Sep 17 00:00:00 2001
+From: armSeb <armSeb@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:30:09 +0100
+Subject: [PATCH] drm/panel: add LG G3 LGD SIC 1440p dual DSI video panel
+
+Panel driver for the 1440x2560 LGD "SIC" video mode panel of the LG G3
+(D855), driven over two DSI links (720x2560 each, 4 lanes). Init and off
+sequences, timings and power-up order come from the vendor device tree
+(msm8974pro-lge-panel.dtsi). Supplies: vdd (1.8 V), vsp/vsn (TPS65132).
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+ .../gpu/drm/panel/msm8974-generated/Kconfig   |   8 +
+ .../gpu/drm/panel/msm8974-generated/Makefile  |   1 +
+ .../msm8974-generated/panel-lge-g3-lgd-sic.c  | 369 ++++++++++++++++++
+ 3 files changed, 378 insertions(+)
+ create mode 100644 drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
+
+diff --git a/drivers/gpu/drm/panel/msm8974-generated/Kconfig b/drivers/gpu/drm/panel/msm8974-generated/Kconfig
+index 95890514a..d029095f9 100644
+--- a/drivers/gpu/drm/panel/msm8974-generated/Kconfig
++++ b/drivers/gpu/drm/panel/msm8974-generated/Kconfig
+@@ -20,4 +20,12 @@ config DRM_PANEL_SONY_LEO_NOVATEK_LGD
+ 	default DRM_PANEL_MSM8974_GENERATED
+ 	select DRM_KMS_HELPER
+ 
++config DRM_PANEL_LGE_G3_LGD_SIC
++	tristate "LG G3 LGD SIC 1440p dual DSI video panel"
++	default DRM_PANEL_MSM8974_GENERATED
++	select DRM_KMS_HELPER
++	help
++	  Say Y here to support the 1440x2560 LGD "SIC" video mode panel of
++	  the LG G3 (D855), driven over two DSI links.
++
+ endmenu
+diff --git a/drivers/gpu/drm/panel/msm8974-generated/Makefile b/drivers/gpu/drm/panel/msm8974-generated/Makefile
+index f35ada096..fa49857cc 100644
+--- a/drivers/gpu/drm/panel/msm8974-generated/Makefile
++++ b/drivers/gpu/drm/panel/msm8974-generated/Makefile
+@@ -1,3 +1,4 @@
+ obj-$(CONFIG_DRM_PANEL_FAIRPHONE_FP2_OTM1902B) += panel-fairphone-fp2-otm1902b.o
+ obj-$(CONFIG_DRM_PANEL_FAIRPHONE_FP2_S6D6FA1) += panel-fairphone-fp2-s6d6fa1.o
+ obj-$(CONFIG_DRM_PANEL_SONY_LEO_NOVATEK_LGD) += panel-sony-leo-novatek-lgd.o
++obj-$(CONFIG_DRM_PANEL_LGE_G3_LGD_SIC) += panel-lge-g3-lgd-sic.o
+diff --git a/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
+new file mode 100644
+index 000000000..69084f8fb
+--- /dev/null
++++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
+@@ -0,0 +1,369 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
++ * links (left half on DSI0, right half on DSI1, 720x2560 each).
++ *
++ * Init/off sequences, timings and power-up order taken from the vendor
++ * device tree (msm8974pro-lge-panel.dtsi, LineageOS android_kernel_lge_g3):
++ *   Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++ * Structure follows the linux-mdss-dsi-panel-driver-generator output and
++ * the dual DSI handling of panel-novatek-nt35950.c.
++ */
++
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_graph.h>
++#include <linux/regulator/consumer.h>
++
++#include <drm/drm_mipi_dsi.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_probe_helper.h>
++
++#include <video/mipi_display.h>
++
++static const char * const lgd_sic_supply_names[] = {
++	"vdd",	/* PM8941 L10, 1.8 V (downstream "vdd") */
++	"vsp",	/* TPS65132 positive output (+5.5 V) */
++	"vsn",	/* TPS65132 negative output (-5.5 V) */
++};
++
++struct lgd_sic {
++	struct drm_panel panel;
++	struct mipi_dsi_device *dsi[2];
++	struct regulator_bulk_data supplies[ARRAY_SIZE(lgd_sic_supply_names)];
++	struct gpio_desc *reset_gpio;
++};
++
++static inline struct lgd_sic *to_lgd_sic(struct drm_panel *panel)
++{
++	return container_of(panel, struct lgd_sic, panel);
++}
++
++static void lgd_sic_reset(struct lgd_sic *ctx)
++{
++	/*
++	 * Vendor reset sequence is just <1 5> (release reset, wait 5 ms).
++	 * Pulse it first so the panel always starts from a known state.
++	 */
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(5000, 6000);
++}
++
++/*
++ * Downstream uses "broadcast mode": the same commands go to both links.
++ * Send them on each link in turn.
++ */
++static void lgd_sic_on_link(struct mipi_dsi_multi_context *dsi_ctx)
++{
++	mipi_dsi_dcs_soft_reset_multi(dsi_ctx);
++	mipi_dsi_msleep(dsi_ctx, 5);
++
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0xac);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb1, 0x47, 0xf0, 0x80, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb2, 0x77, 0x28, 0x27);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb3, 0x0f, 0x12, 0x22, 0x20, 0x00,
++				     0xa0);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb4, 0x13, 0x10, 0x10, 0x0a, 0x0a,
++				     0x0a, 0x0a);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb5, 0x30, 0x26, 0x1a, 0x1a, 0x10,
++				     0x10, 0x40, 0x10, 0x05);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb7, 0x62, 0x01, 0x3f);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc0, 0x03, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc1, 0x22, 0x80, 0xf0, 0x01, 0xcf);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc2, 0x22);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc3, 0x06, 0x88, 0x0c, 0x00, 0x1b,
++				     0x1b);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc4, 0x47, 0x0c, 0x0c);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc5, 0x41, 0x81, 0x05, 0x05, 0x59,
++				     0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xca, 0x20, 0xb9);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xc9, 0x3f);
++	/* Gamma (identical for all six registers) */
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd0, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd1, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd2, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd3, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd4, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xd5, 0x03, 0x30, 0x35, 0x55, 0x22,
++				     0x34, 0x0f, 0x06, 0x51, 0x33, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe9, 0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb6, 0x00, 0x00);
++	/* Panel-side brightness at max, backlight is the LM3697 */
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_SET_DISPLAY_BRIGHTNESS, 0xff);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x5e, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY, 0x2c);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb8, 0x11, 0x11, 0x11, 0x38, 0x00,
++				     0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_WRITE_POWER_SAVE, 0x81);
++	/* Image enhancement ("sharpening", 0x33 = default on) */
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x33);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf1, 0x00, 0x00, 0x02, 0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf2, 0x01, 0x00, 0x40);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf3, 0x00, 0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf4, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf5, 0x01, 0x00, 0x61);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf6, 0x03, 0x00, 0x61);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf7, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf8, 0x40, 0x40, 0x40, 0x40, 0x40,
++				     0x40, 0x40, 0x40, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf9, 0x40, 0x40, 0x40, 0x40, 0x40,
++				     0x40, 0x40, 0x40, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xfa, 0x40, 0x40, 0x40, 0x40, 0x40,
++				     0x40, 0x40, 0x40, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00, 0x00);
++}
++
++static int lgd_sic_on(struct lgd_sic *ctx)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { };
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		lgd_sic_on_link(&dsi_ctx);
++	}
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
++	}
++	mipi_dsi_msleep(&dsi_ctx, 5);	/* vendor value; 120 ms if unstable */
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
++	}
++
++	return dsi_ctx.accum_err;
++}
++
++static int lgd_sic_off(struct lgd_sic *ctx)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { };
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		ctx->dsi[i]->mode_flags &= ~MIPI_DSI_MODE_LPM;
++		mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
++	}
++	mipi_dsi_msleep(&dsi_ctx, 20);
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
++	}
++	mipi_dsi_msleep(&dsi_ctx, 80);
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++)
++		ctx->dsi[i]->mode_flags |= MIPI_DSI_MODE_LPM;
++
++	return dsi_ctx.accum_err;
++}
++
++static int lgd_sic_prepare(struct drm_panel *panel)
++{
++	struct lgd_sic *ctx = to_lgd_sic(panel);
++	struct device *dev = &ctx->dsi[0]->dev;
++	int ret;
++
++	/* vdd (1.8 V) first, then the +/-5.5 V DSV outputs */
++	ret = regulator_enable(ctx->supplies[0].consumer);
++	if (ret < 0) {
++		dev_err(dev, "Failed to enable vdd: %d\n", ret);
++		return ret;
++	}
++	usleep_range(1000, 2000);
++
++	ret = regulator_enable(ctx->supplies[1].consumer);
++	if (ret < 0)
++		goto err_vdd;
++	ret = regulator_enable(ctx->supplies[2].consumer);
++	if (ret < 0)
++		goto err_vsp;
++	usleep_range(5000, 6000);
++
++	lgd_sic_reset(ctx);
++
++	ret = lgd_sic_on(ctx);
++	if (ret < 0) {
++		dev_err(dev, "Failed to initialize panel: %d\n", ret);
++		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++		goto err_vsn;
++	}
++
++	return 0;
++
++err_vsn:
++	regulator_disable(ctx->supplies[2].consumer);
++err_vsp:
++	regulator_disable(ctx->supplies[1].consumer);
++err_vdd:
++	regulator_disable(ctx->supplies[0].consumer);
++	return ret;
++}
++
++static int lgd_sic_unprepare(struct drm_panel *panel)
++{
++	struct lgd_sic *ctx = to_lgd_sic(panel);
++	struct device *dev = &ctx->dsi[0]->dev;
++	int ret;
++
++	ret = lgd_sic_off(ctx);
++	if (ret < 0)
++		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	regulator_disable(ctx->supplies[2].consumer);
++	regulator_disable(ctx->supplies[1].consumer);
++	regulator_disable(ctx->supplies[0].consumer);
++
++	return 0;
++}
++
++/*
++ * Full panel mode. In bonded DSI mode the MSM DSI host halves the
++ * horizontal timings, so each link gets the vendor 720-pixel timings
++ * (HFP 12, HSW 12, HBP 40).
++ */
++static const struct drm_display_mode lgd_sic_mode = {
++	.clock = (1440 + 24 + 24 + 80) * (2560 + 5 + 1 + 5) * 60 / 1000,
++	.hdisplay = 1440,
++	.hsync_start = 1440 + 24,
++	.hsync_end = 1440 + 24 + 24,
++	.htotal = 1440 + 24 + 24 + 80,
++	.vdisplay = 2560,
++	.vsync_start = 2560 + 5,
++	.vsync_end = 2560 + 5 + 1,
++	.vtotal = 2560 + 5 + 1 + 5,
++	.width_mm = 68,
++	.height_mm = 120,
++	.type = DRM_MODE_TYPE_DRIVER,
++};
++
++static int lgd_sic_get_modes(struct drm_panel *panel,
++			     struct drm_connector *connector)
++{
++	return drm_connector_helper_get_modes_fixed(connector, &lgd_sic_mode);
++}
++
++static const struct drm_panel_funcs lgd_sic_panel_funcs = {
++	.prepare = lgd_sic_prepare,
++	.unprepare = lgd_sic_unprepare,
++	.get_modes = lgd_sic_get_modes,
++};
++
++static int lgd_sic_probe(struct mipi_dsi_device *dsi)
++{
++	const struct mipi_dsi_device_info info = {
++		.type = "lgd-sic-dsi1",
++		.channel = 0,
++		.node = NULL,
++	};
++	struct device *dev = &dsi->dev;
++	struct mipi_dsi_host *dsi1_host;
++	struct device_node *dsi1;
++	struct lgd_sic *ctx;
++	int i, ret;
++
++	ctx = devm_drm_panel_alloc(dev, struct lgd_sic, panel,
++				   &lgd_sic_panel_funcs,
++				   DRM_MODE_CONNECTOR_DSI);
++	if (IS_ERR(ctx))
++		return PTR_ERR(ctx);
++
++	for (i = 0; i < ARRAY_SIZE(ctx->supplies); i++)
++		ctx->supplies[i].supply = lgd_sic_supply_names[i];
++	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ctx->supplies),
++				      ctx->supplies);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "Failed to get regulators\n");
++
++	/* Keep the panel as the bootloader left it until prepare() */
++	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
++	if (IS_ERR(ctx->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
++				     "Failed to get reset-gpios\n");
++
++	/* Right half: DSI1, found through port@1 of the panel node */
++	dsi1 = of_graph_get_remote_node(dev->of_node, 1, -1);
++	if (!dsi1)
++		return dev_err_probe(dev, -ENODEV, "Cannot get DSI1 node\n");
++	dsi1_host = of_find_mipi_dsi_host_by_node(dsi1);
++	of_node_put(dsi1);
++	if (!dsi1_host)
++		return dev_err_probe(dev, -EPROBE_DEFER, "Cannot get DSI1 host\n");
++
++	ctx->dsi[1] = devm_mipi_dsi_device_register_full(dev, dsi1_host, &info);
++	if (IS_ERR(ctx->dsi[1]))
++		return dev_err_probe(dev, PTR_ERR(ctx->dsi[1]),
++				     "Cannot register DSI1 device\n");
++
++	ctx->dsi[0] = dsi;
++	mipi_dsi_set_drvdata(dsi, ctx);
++
++	ctx->panel.prepare_prev_first = true;
++
++	ret = drm_panel_of_backlight(&ctx->panel);
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to get backlight\n");
++
++	drm_panel_add(&ctx->panel);
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		ctx->dsi[i]->lanes = 4;
++		ctx->dsi[i]->format = MIPI_DSI_FMT_RGB888;
++		/* non_burst_sync_event, init commands in LP mode */
++		ctx->dsi[i]->mode_flags = MIPI_DSI_MODE_VIDEO |
++					  MIPI_DSI_CLOCK_NON_CONTINUOUS |
++					  MIPI_DSI_MODE_LPM;
++
++		ret = devm_mipi_dsi_attach(dev, ctx->dsi[i]);
++		if (ret < 0) {
++			drm_panel_remove(&ctx->panel);
++			return dev_err_probe(dev, ret,
++					     "Cannot attach to DSI%d host\n", i);
++		}
++	}
++
++	return 0;
++}
++
++static void lgd_sic_remove(struct mipi_dsi_device *dsi)
++{
++	struct lgd_sic *ctx = mipi_dsi_get_drvdata(dsi);
++
++	drm_panel_remove(&ctx->panel);
++}
++
++static const struct of_device_id lgd_sic_of_match[] = {
++	{ .compatible = "lge,g3-panel-lgd-sic" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, lgd_sic_of_match);
++
++static struct mipi_dsi_driver lgd_sic_driver = {
++	.probe = lgd_sic_probe,
++	.remove = lgd_sic_remove,
++	.driver = {
++		.name = "panel-lge-g3-lgd-sic",
++		.of_match_table = lgd_sic_of_match,
++	},
++};
++module_mipi_dsi_driver(lgd_sic_driver);
++
++MODULE_DESCRIPTION("DRM driver for the LG G3 LGD SIC 1440p dual DSI video panel");
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+
