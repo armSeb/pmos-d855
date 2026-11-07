@@ -12,7 +12,18 @@
 #
 # Usage : sh mdp-dump.sh
 
-dm() { busybox devmem "$1" 32 2>/dev/null || echo "?"; }
+# Lecteur de registres : devmem de busybox (initramfs pmOS), sinon devmem2
+if busybox devmem 0xfd900000 32 >/dev/null 2>&1; then
+	dm() { busybox devmem "$1" 32 2>/dev/null || echo "?"; }
+elif command -v devmem2 >/dev/null; then
+	dm() { devmem2 "$1" w 2>/dev/null | sed -n 's/.*: *\(0x[0-9A-Fa-f]*\)$/\1/p' | tail -1; }
+else
+	echo "Impossible de lire /dev/mem :" >&2
+	busybox devmem 0xfd900000 32 >&2
+	echo "(lancer en root ; si l'applet devmem manque, utiliser le shell de" >&2
+	echo " debug de l'initramfs : pmbootstrap flasher boot --cmdline \"pmos.debug-shell ...\")" >&2
+	exit 1
+fi
 hex2dec() { printf '%d' "$1" 2>/dev/null || echo 0; }
 
 MDP=0xfd900100	# reg "mdp_phys" du nœud mdp dans qcom-msm8974.dtsi
