@@ -13,18 +13,19 @@ margin, for as long as simpledrm is bound.
 Signed-off-by: armSeb <armSeb@users.noreply.github.com>
 ---
 diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
-index a1c311933..f2a1a21d1 100644
+index a1c311933..41165df88 100644
 --- a/drivers/gpu/drm/sysfb/simpledrm.c
 +++ b/drivers/gpu/drm/sysfb/simpledrm.c
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,8 @@
  
  #include <linux/aperture.h>
  #include <linux/clk.h>
 +#include <linux/interconnect.h>
++#include <linux/math64.h>
  #include <linux/of_clk.h>
  #include <linux/minmax.h>
  #include <linux/of_address.h>
-@@ -225,6 +226,11 @@ struct simpledrm_device {
+@@ -225,6 +227,11 @@ struct simpledrm_device {
  	struct device **pwr_dom_devs;
  	struct device_link **pwr_dom_links;
  #endif
@@ -36,7 +37,7 @@ index a1c311933..f2a1a21d1 100644
  
  	/* modesetting */
  	u32 formats[DRM_SYSFB_PLANE_NFORMATS(1)];
-@@ -547,6 +553,91 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
+@@ -547,6 +554,92 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
  }
  #endif
  
@@ -65,8 +66,9 @@ index a1c311933..f2a1a21d1 100644
 +{
 +	struct drm_device *dev = &sdev->sysfb.dev;
 +	struct device *ddev = dev->dev;
-+	/* bytes per frame, 60 Hz, x2 margin, in kB/s */
-+	u32 bw = (u32)min_t(u64, (u64)stride * height * 60 * 2 / 1000, U32_MAX);
++	/* bytes per frame, 60 Hz, x2 margin, in kB/s (div_u64: 32-bit ARM) */
++	u32 bw = (u32)min_t(u64, div_u64((u64)stride * height * 60 * 2, 1000),
++			    U32_MAX);
 +	unsigned int i;
 +	int count, ret;
 +
@@ -128,7 +130,7 @@ index a1c311933..f2a1a21d1 100644
  /*
   * Modesetting
   */
-@@ -681,6 +772,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+@@ -681,6 +774,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
  			return ERR_PTR(-EINVAL);
  	}
  
