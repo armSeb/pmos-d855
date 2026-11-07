@@ -666,9 +666,13 @@
 	};
 
 	sdc2_on: sdc2-on-state {
+		/*
+		 * Downstream G3 : horloge réduite de 16 à 6 mA (« 16mA --> 6mA »
+		 * dans qcom,pad-drv-on). À 16 mA les modes UHS échouent.
+		 */
 		clk-pins {
 			pins = "sdc2_clk";
-			drive-strength = <16>;
+			drive-strength = <6>;
 			bias-disable;
 		};
 
