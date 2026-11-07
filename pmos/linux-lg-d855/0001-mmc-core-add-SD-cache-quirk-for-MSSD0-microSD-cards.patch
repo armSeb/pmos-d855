@@ -1,0 +1,37 @@
+From e468257f72c1eee9f2be0ab9baf9ad090482a40e Mon Sep 17 00:00:00 2001
+From: armSeb <armSeb@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 13:52:36 +0100
+Subject: [PATCH] mmc: core: add SD cache quirk for MSSD0 microSD cards
+
+These cards (manfid 0xc9, oemid 0x4d60, 11/2025) never complete the
+SD cache enable/flush extension register writes: initialisation fails
+with 'Card stuck being busy' / -110 on sdhci-msm, and cache flushes
+time out on sdhci-pci. Disable the SD cache and power-off notification.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+ drivers/mmc/core/quirks.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/mmc/core/quirks.h b/drivers/mmc/core/quirks.h
+index c417ed34c..3dc4ea3a1 100644
+--- a/drivers/mmc/core/quirks.h
++++ b/drivers/mmc/core/quirks.h
+@@ -34,6 +34,14 @@ static const struct mmc_fixup __maybe_unused mmc_sd_fixups[] = {
+ 		   MMC_QUIRK_BROKEN_SD_CACHE | MMC_QUIRK_BROKEN_SD_POWEROFF_NOTIFY,
+ 		   EXT_CSD_REV_ANY),
+ 
++	/*
++	 * "MSSD0" microSD cards (manfid 0xc9, oemid 0x4d60), seen on 11/2025,
++	 * time out when the SD cache is enabled or flushed, on both Intel
++	 * sdhci-pci and Qualcomm sdhci-msm hosts.
++	 */
++	MMC_FIXUP("MSSD0", 0xc9, 0x4d60, add_quirk_sd,
++		  MMC_QUIRK_BROKEN_SD_CACHE | MMC_QUIRK_BROKEN_SD_POWEROFF_NOTIFY),
++
+ 	/*
+ 	 * Swissbit series S46-u cards throw I/O errors during tuning requests
+ 	 * after the initial tuning request expectedly times out. This has
+-- 
+2.43.0
+
