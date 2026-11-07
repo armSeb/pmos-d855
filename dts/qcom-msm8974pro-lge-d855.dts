@@ -63,11 +63,12 @@
 			reg = <0x03200000 (1440 * 2560 * 3)>;
 			memory-region = <&cont_splash_mem>;
 			/*
-			 * Garde la bande passante MDP -> DDR (patch 0003 de
-			 * simpledrm) : sans ce vote, l'interconnect la coupe et
-			 * l'écran passe au bleu (underflow du MDP5).
+			 * Garde la mémoire principale (BIMC) à pleine vitesse
+			 * (patch 0003 de simpledrm). Le bus multimédia (MMSS NoC),
+			 * lui, n'est pas voté : son driver est désactivé plus bas
+			 * pour qu'il garde les réglages du bootloader.
 			 */
-			interconnects = <&mmssnoc MNOC_MAS_MDP_PORT0 &bimc BIMC_SLV_EBI_CH0>;
+			interconnects = <&bimc BIMC_MAS_AMPSS_M0 &bimc BIMC_SLV_EBI_CH0>;
 			width = <1440>;
 			height = <2560>;
 			stride = <(1440 * 3)>;
@@ -296,6 +297,18 @@
  * laissé par le bootloader (voir chosen/framebuffer).
  */
 &mdss {
+	status = "disabled";
+};
+
+/*
+ * Bus multimédia (MMSS NoC) : laissé tel que le bootloader l'a réglé tant
+ * que l'affichage passe par son framebuffer. Son driver d'interconnect part
+ * d'une bande passante nulle : au premier vote ou au sync_state, il baisse
+ * l'horloge AXI (MMSS_S0_AXI) sous le MDP qui balaie l'écran, et le MDP5
+ * passe en underflow (écran bleu). Seuls le MDP et le GPU l'utilisent, et
+ * les deux sont désactivés.
+ */
+&mmssnoc {
 	status = "disabled";
 };
 

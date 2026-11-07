@@ -7,13 +7,14 @@ providers reach sync_state, the unclaimed MDP->DDR bandwidth is dropped,
 the display controller underflows and the panel turns blue.
 
 Vote on every path listed in an "interconnects" property of the
-simple-framebuffer node, sized for the framebuffer at 60 Hz with a 2x
-margin, for as long as simpledrm is bound.
+simple-framebuffer node for as long as simpledrm is bound: average sized
+for the framebuffer at 60 Hz with a 2x margin, peak at the maximum so the
+bus is never clocked below what the firmware set up.
 
 Signed-off-by: armSeb <armSeb@users.noreply.github.com>
 ---
 diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
-index a1c311933..41165df88 100644
+index a1c311933..32b6b4a35 100644
 --- a/drivers/gpu/drm/sysfb/simpledrm.c
 +++ b/drivers/gpu/drm/sysfb/simpledrm.c
 @@ -2,6 +2,8 @@
@@ -37,7 +38,7 @@ index a1c311933..41165df88 100644
  
  	/* modesetting */
  	u32 formats[DRM_SYSFB_PLANE_NFORMATS(1)];
-@@ -547,6 +554,92 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
+@@ -547,6 +554,93 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
  }
  #endif
  
@@ -48,8 +49,9 @@ index a1c311933..41165df88 100644
 + * The firmware-configured display controller keeps fetching the framebuffer
 + * from memory. Once the interconnect providers reach sync_state, bandwidth
 + * nobody asked for is dropped and the controller underflows. Keep a vote on
-+ * every path listed in "interconnects", sized for the framebuffer at 60 Hz
-+ * with some margin.
++ * every path listed in "interconnects": average sized for the framebuffer
++ * at 60 Hz with some margin, peak at the maximum so the bus is never
++ * clocked below what the firmware set up.
 + */
 +
 +static void simpledrm_device_release_icc(void *res)
@@ -99,7 +101,7 @@ index a1c311933..41165df88 100644
 +			continue;
 +		}
 +
-+		ret = icc_set_bw(path, bw, bw);
++		ret = icc_set_bw(path, bw, INT_MAX);
 +		if (ret) {
 +			drm_warn(dev, "failed to vote on interconnect path %u: %d\n",
 +				 i, ret);
@@ -109,7 +111,7 @@ index a1c311933..41165df88 100644
 +		sdev->icc_paths[sdev->icc_count++] = path;
 +	}
 +
-+	drm_dbg(dev, "holding %u interconnect path(s) at %u kB/s\n",
++	drm_info(dev, "holding %u interconnect path(s), avg %u kB/s, peak max\n",
 +		sdev->icc_count, bw);
 +
 +	return devm_add_action_or_reset(ddev, simpledrm_device_release_icc, sdev);
@@ -130,7 +132,7 @@ index a1c311933..41165df88 100644
  /*
   * Modesetting
   */
-@@ -681,6 +774,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+@@ -681,6 +775,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
  			return ERR_PTR(-EINVAL);
  	}
  
