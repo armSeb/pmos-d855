@@ -60,6 +60,7 @@ read -r answer
 [ "$answer" = "$dev" ] || die "confirmation incorrecte, rien n'a été fait"
 
 work=$(pmbootstrap config work 2>/dev/null) || die "pas de config pmbootstrap : lancer « pmbootstrap init » une fois"
+. "$here/common.sh"
 
 # --- 2. pmaports ------------------------------------------------------------
 step "Clone pmaports"
@@ -88,21 +89,6 @@ pmbootstrap config ui "$ui"
 # Changer d'UI peut changer de canal (systemd-edge pour phosh) : des chroots
 # créés pour un autre canal font échouer l'installation. On les supprime
 # (seulement les chroots : paquets construits et caches conservés).
-#
-# Un run interrompu peut laisser des montages que pmbootstrap ne suit plus
-# (« Failed to shut down all chroots ») : on les démonte nous-mêmes, du plus
-# profond au moins profond, avant de laisser pmbootstrap faire le ménage.
-release_chroots() {
-	pmbootstrap shutdown >/dev/null 2>&1 || true
-	findmnt -rno TARGET | grep -F "$work/" | sort -r | while IFS= read -r m; do
-		sudo umount "$m" 2>/dev/null || sudo umount -l "$m" 2>/dev/null || true
-	done
-	if findmnt -rno TARGET | grep -qF "$work/"; then
-		echo "Montages restants sous $work :" >&2
-		findmnt -rno TARGET | grep -F "$work/" >&2
-		die "impossible de tout démonter (un shell est-il resté dans un chroot ?)"
-	fi
-}
 release_chroots
 pmbootstrap -y zap
 
@@ -113,6 +99,7 @@ if lsblk -no MOUNTPOINT "$dev" | grep -q .; then
 fi
 pmbootstrap -y install --sdcard="$dev"
 sync
+release_chroots
 
 # --- 6. vérification de la partition de boot --------------------------------
 step "Carte : contenu de pmOS_boot"

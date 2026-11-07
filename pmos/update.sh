@@ -24,16 +24,19 @@ die() { echo "ERREUR : $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 
 work=$(pmbootstrap config work) || die "pas de config pmbootstrap"
+. "$here/common.sh"
 aports="$work/cache_git/pmaports"
 
 step "Paquets"
 "$here/sync.sh" "$aports"
+release_chroots
 pmbootstrap checksum $pkgs
 pmbootstrap build $pkgs
 
 step "Installation sur $user@$host"
 ping -c1 -W2 "$host" >/dev/null 2>&1 || die "$host ne répond pas (téléphone démarré, câble USB ?)"
 pmbootstrap sideload --host "$host" --user "$user" --arch armv7 $pkgs
+release_chroots
 
 step "Récupération du boot.img régénéré"
 mkdir -p "$top/out"
