@@ -3,25 +3,42 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=2
-url="https://postmarketos.org"
+pkgrel=3
+url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
 options="!check !archcheck"
+# Outils de bring-up : bus I2C (i2c-tools), GPIO (libgpiod), entrées
+# (evtest), USB (usbutils), WiFi (iw), traçage (strace).
 depends="
 	linux-lg-d855
 	mkbootimg
 	postmarketos-base
-"
+	evtest
+	i2c-tools
+	iw
+	libgpiod
+	strace
+	usbutils
+	"
 makedepends="devicepkg-dev"
-source="deviceinfo"
+source="
+	deviceinfo
+	devmem32.c
+	mdp-dump.sh
+	"
 
 build() {
 	devicepkg_build $startdir $pkgname
+	# lecture/écriture de registres (tools/devmem32 du dépôt)
+	${CC:-gcc} $CFLAGS -Wall -o devmem32 "$srcdir"/devmem32.c $LDFLAGS
 }
 
 package() {
 	devicepkg_package $startdir $pkgname
+
+	install -Dm755 devmem32 "$pkgdir"/usr/bin/devmem32
+	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
 }
 
 # Sommes générées par : pmbootstrap checksum device-lg-d855

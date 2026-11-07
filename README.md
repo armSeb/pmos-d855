@@ -12,8 +12,10 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 | `dts/qcom-msm8974pro-lge-d855.dts` | Device tree mainline (source de référence) |
 | `pmos/install-sdcard.sh` | **Construit et écrit une microSD démarrable** (procédure complète) |
 | `pmos/linux-lg-d855/`, `pmos/device-lg-d855/` | Paquets pmOS : noyau épinglé + config, deviceinfo |
+| `pmos/update.sh` | **Mise à jour** : reconstruit les paquets, les installe sur le téléphone (sideload) et démarre le nouveau noyau |
 | `pmos/sync.sh`, `pmos/make-config.sh` | Copie des paquets dans pmaports, régénération de la config noyau ([détails](pmos/README.md)) |
 | `tools/flash-lk2nd.sh`, `tools/lg-bump.py` | Téléchargement, bump LG et flash de lk2nd (mode Download, fastboot ou TWRP) |
+| `tools/devmem32/` | Lecture/écriture de registres par `/dev/mem` (installé sur le téléphone) |
 | `tools/mdp-dump.sh` | Relève le framebuffer du bootloader (registres MDP5), à lancer sur le téléphone |
 | `tools/build-kernel.sh` | Compilation rapide zImage + DTB hors pmbootstrap (`DTB_ONLY=1` pour le DTB seul) |
 | `tools/extract-firmware.sh` | Copie des firmwares depuis les partitions Android (à lancer sur le téléphone) |
@@ -118,12 +120,32 @@ L'initramfs trouve `pmOS_root` par son label, sur la microSD.
 Si le boot échoue avant le rootfs :
 `pmbootstrap flasher boot --cmdline pmos.debug-shell`, puis `telnet 172.16.42.1`.
 
+### Mettre à jour (sans réécrire la carte)
+
+Le téléphone démarré sous pmOS et joignable en SSH (172.16.42.1 par l'USB) :
+
+```sh
+git pull
+pmos/update.sh
+```
+
+Le script recopie les paquets dans pmaports, recalcule les sommes, construit
+`linux-lg-d855` et `device-lg-d855`, les installe sur le téléphone avec
+`pmbootstrap sideload`, récupère le `boot.img` régénéré, redémarre vers lk2nd
+et le démarre par fastboot. Si le téléphone ne reste pas en fastboot,
+maintenir Vol− pendant le redémarrage. `CMDLINE="…"` remplace la ligne de
+commande pour un essai, `NO_BOOT=1` s'arrête après l'installation.
+
+Le paquet `device-lg-d855` installe aussi les outils de bring-up :
+`i2cdetect`/`i2cget` (i2c-tools), `gpioinfo`/`gpioget` (libgpiod), `evtest`,
+`lsusb`, `iw`, `strace`, `devmem32` et `mdp-dump`.
+
 ### 4. Relever le framebuffer du bootloader
 
 Dans le shell de debug ou en SSH, écran encore allumé par le bootloader :
 
 ```sh
-sh mdp-dump.sh      # copié depuis tools/ (scp, ou wget depuis le PC)
+sudo mdp-dump       # installé par device-lg-d855
 ```
 
 ### 5. Itérer sur le DTS

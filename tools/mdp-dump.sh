@@ -6,22 +6,23 @@
 # framebuffer que le bootloader LG affiche : adresse, taille, stride, format.
 # Ces valeurs servent à déclarer un simple-framebuffer dans le DTS.
 #
-# Prérequis : busybox avec l'applet devmem (initramfs pmOS), /dev/mem, et le
+# Prérequis : devmem32 (installé par device-lg-d855), root, et le
 # noyau démarré avec clk_ignore_unused (sinon les horloges du MDP sont
 # coupées et les lectures renvoient 0 ou bloquent).
 #
 # Usage : sh mdp-dump.sh
 
-# Lecteur de registres : devmem de busybox (initramfs pmOS), sinon devmem2
-if busybox devmem 0xfd900000 32 >/dev/null 2>&1; then
+# Lecteur de registres : devmem32 (paquet device-lg-d855), sinon devmem de
+# busybox (initramfs), sinon devmem2
+if command -v devmem32 >/dev/null; then
+	dm() { devmem32 "$1" 2>/dev/null || echo "?"; }
+elif busybox devmem 0xfd900000 32 >/dev/null 2>&1; then
 	dm() { busybox devmem "$1" 32 2>/dev/null || echo "?"; }
 elif command -v devmem2 >/dev/null; then
 	dm() { devmem2 "$1" w 2>/dev/null | sed -n 's/.*: *\(0x[0-9A-Fa-f]*\)$/\1/p' | tail -1; }
 else
-	echo "Impossible de lire /dev/mem :" >&2
+	echo "Aucun outil pour lire /dev/mem (devmem32, busybox devmem, devmem2)." >&2
 	busybox devmem 0xfd900000 32 >&2
-	echo "(lancer en root ; si l'applet devmem manque, utiliser le shell de" >&2
-	echo " debug de l'initramfs : pmbootstrap flasher boot --cmdline \"pmos.debug-shell ...\")" >&2
 	exit 1
 fi
 hex2dec() { printf '%d' "$1" 2>/dev/null || echo 0; }
