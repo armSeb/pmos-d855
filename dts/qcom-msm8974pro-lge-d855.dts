@@ -64,11 +64,13 @@
 			memory-region = <&cont_splash_mem>;
 			/*
 			 * Garde la mémoire principale (BIMC) à pleine vitesse
-			 * (patch 0003 de simpledrm). Le bus multimédia (MMSS NoC),
+			 * (patch 0003 de simpledrm), sur le chemin d'entrée du
+			 * trafic multimédia (BIMC_TO_MNOC ; AMPSS_M0 n'a pas de
+			 * lien vers EBI dans le driver). Le bus multimédia (MMSS NoC),
 			 * lui, n'est pas voté : son driver est désactivé plus bas
 			 * pour qu'il garde les réglages du bootloader.
 			 */
-			interconnects = <&bimc BIMC_MAS_AMPSS_M0 &bimc BIMC_SLV_EBI_CH0>;
+			interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>;
 			width = <1440>;
 			height = <2560>;
 			stride = <(1440 * 3)>;
@@ -670,8 +672,13 @@
 	vqmmc-supply = <&pm8941_s3>;
 	non-removable;
 
+	/*
+	 * L'horloge 32 kHz (PM8941 GPIO16) doit tourner avant la mise sous
+	 * tension de la BCM4339 : elle est donc liée au contrôleur, pas au
+	 * nœud wifi (appliqué seulement après l'énumération de la carte).
+	 */
 	pinctrl-names = "default";
-	pinctrl-0 = <&sdc3_on>;
+	pinctrl-0 = <&sdc3_on>, <&wlan_sleep_clk_pin>;
 
 	wifi@1 {
 		compatible = "brcm,bcm4339-fmac", "brcm,bcm4329-fmac";
@@ -683,7 +690,7 @@
 		interrupt-names = "host-wake";
 
 		pinctrl-names = "default";
-		pinctrl-0 = <&wlan_sleep_clk_pin>, <&wlan_hostwake_pin>;
+		pinctrl-0 = <&wlan_hostwake_pin>;
 	};
 };
 
