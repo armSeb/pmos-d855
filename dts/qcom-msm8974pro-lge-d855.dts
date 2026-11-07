@@ -514,10 +514,12 @@
 			regulator-boot-on;
 		};
 
-		/* microSD VQMMC */
+		/* microSD VQMMC (downstream : jusqu'à 22 mA) */
 		pm8941_l13: l13 {
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <2950000>;
+			regulator-system-load = <22000>;
+			regulator-allow-set-load;
 			regulator-boot-on;
 		};
 
@@ -560,10 +562,17 @@
 			regulator-boot-on;
 		};
 
-		/* microSD VMMC */
+		/*
+		 * microSD VMMC (downstream : jusqu'à 800 mA). Sans vote de charge,
+		 * le RPM peut laisser le LDO en mode basse consommation, trop
+		 * faible pour une carte en cours d'initialisation. Même réglage
+		 * que le Xperia Z3 et le Galaxy S5.
+		 */
 		pm8941_l21: l21 {
 			regulator-min-microvolt = <2950000>;
 			regulator-max-microvolt = <2950000>;
+			regulator-system-load = <500000>;
+			regulator-allow-set-load;
 			regulator-boot-on;
 		};
 
