@@ -173,8 +173,8 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 0. lk2nd bumpé démarre. ✓
 1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
 2. Affichage via le framebuffer laissé par le bootloader (simple-framebuffer +
-   simpledrm) : lancer `tools/mdp-dump.sh` sur le téléphone, reporter
-   adresse, taille, stride et format dans `chosen` du DTS. ← **prochaine étape**
+   simpledrm) : 1440x2560 RGB888 à `0x03200000`, stride 4320 (relevé avec
+   `mdp-dump`). Dans le DTS, à tester. ← **on en est là**
 3. Affichage natif. Le driver du panel est écrit
    (`pmos/linux-lg-d855/0002-…patch`, compatible `lge,g3-panel-lgd-sic`)
    et le DTS décrit DSI0 + DSI1 couplés, le rétroéclairage LM3697 et le
