@@ -23,7 +23,12 @@ deviceinfo_getty="ttyMSM0;115200"
 # Linux coupe les horloges et régulateurs « inutilisés », le MDSS arrête de
 # rafraîchir le panel alors que ses alimentations (DSV, GPIO 56/100) restent
 # allumées → écran rose et rémanence. À retirer quand le panel sera géré.
-deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused regulator_ignore_unused"
+# initcall_blacklist=mmcc_msm8974_driver_init : au démarrage, le driver
+# d'horloges multimédia casse l'affichage hérité du bootloader dans la première
+# seconde (écran bleu ; isolé par élimination, et ce n'est pas seulement la
+# reprogrammation des MMPLL, cf. patch 0004). Rien d'actif n'en dépend tant que
+# MDSS, GPU et vidéo sont désactivés. À retirer pour le GPU.
+deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused regulator_ignore_unused initcall_blacklist=mmcc_msm8974_driver_init"
 
 # Bootloader related
 deviceinfo_flash_method="fastboot"
