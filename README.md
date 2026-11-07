@@ -31,13 +31,13 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 
 | Bloc | Composant | Dans le DTS | Driver mainline |
 |---|---|---|---|
-| eMMC | SDHC1 | activé | oui |
-| microSD | SDHC2, CD = TLMM 95 | activé | oui |
+| eMMC | SDHC1 | activé, testé (HS200) | oui |
+| microSD | SDHC2, CD = TLMM 95, horloge 6 mA | activé, **testé en UHS** | oui |
 | USB | ChipIdea + HS PHY | activé (gadget/OTG) | oui |
 | Boutons | Volume (PM8941 GPIO 2/3), power | activé | oui |
 | Chargeur | bq24296 @ blsp1_i2c1 0x6b | activé | oui (`bq24190_charger`) |
 | Jauge | MAX17048 @ 0x36, IRQ TLMM 9 | activé | oui (`max17040_battery`) |
-| Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé | oui (RMI4) |
+| Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé, **testé** | oui (RMI4) |
 | WiFi | BCM4339 sur SDHC3, REG_ON TLMM 69, host-wake TLMM 44 | activé | oui (`brcmfmac`, firmware requis) |
 | Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
