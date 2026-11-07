@@ -19,6 +19,12 @@ deviceinfo_screen_width="1440"
 deviceinfo_screen_height="2560"
 deviceinfo_getty="ttyMSM0;115200"
 
+# Provisoire, tant qu'il n'y a pas de driver d'affichage : sans ces options,
+# Linux coupe les horloges et régulateurs « inutilisés », le MDSS arrête de
+# rafraîchir le panel alors que ses alimentations (DSV, GPIO 56/100) restent
+# allumées → écran rose et rémanence. À retirer quand le panel sera géré.
+deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused regulator_ignore_unused"
+
 # Bootloader related
 deviceinfo_flash_method="fastboot"
 deviceinfo_generate_bootimg="true"
