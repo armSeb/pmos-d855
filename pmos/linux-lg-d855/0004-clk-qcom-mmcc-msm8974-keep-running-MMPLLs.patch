@@ -1,0 +1,70 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: mmcc-msm8974: don't reconfigure MMPLLs that are running
+
+mmcc_msm8974_probe() unconditionally reprograms MMPLL1 and MMPLL3. On the
+LG G3 the bootloader leaves the dual-DSI panel running (continuous
+splash, used as simple-framebuffer); reconfiguring the PLLs under the
+live display controller breaks the scanout within the first second of
+boot and the panel turns blue. Blacklisting the mmcc initcall keeps the
+picture.
+
+Only configure a PLL when it is not already locked.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/clk/qcom/mmcc-msm8974.c b/drivers/clk/qcom/mmcc-msm8974.c
+index a0f7a9116..3252e5599 100644
+--- a/drivers/clk/qcom/mmcc-msm8974.c
++++ b/drivers/clk/qcom/mmcc-msm8974.c
+@@ -2748,6 +2748,38 @@ static void msm8226_clock_override(void)
+ 	cpp_clk_src.freq_tbl = ftbl_camss_vfe_cpp_clk_msm8226;
+ }
+ 
++/*
++ * The bootloader may leave the display running from MMPLL1/MMPLL3 (e.g. a
++ * continuous splash screen handed over as simple-framebuffer). Reconfiguring
++ * a locked PLL under a live display controller breaks the scanout, so only
++ * configure the PLLs that are not already running.
++ */
++static bool mmcc_msm8974_pll_is_locked(struct regmap *regmap,
++				       const struct clk_pll *pll)
++{
++	u32 val;
++
++	if (regmap_read(regmap, pll->status_reg, &val))
++		return false;
++
++	return val & BIT(pll->status_bit);
++}
++
++static void mmcc_msm8974_configure_pll(struct device *dev,
++				       struct regmap *regmap,
++				       struct clk_pll *pll,
++				       const struct pll_config *config,
++				       bool fsm_mode)
++{
++	if (mmcc_msm8974_pll_is_locked(regmap, pll)) {
++		dev_info(dev, "%s already running, keeping bootloader configuration\n",
++			 pll->clkr.hw.init ? pll->clkr.hw.init->name : "PLL");
++		return;
++	}
++
++	clk_pll_configure_sr_hpm_lp(pll, regmap, config, fsm_mode);
++}
++
+ static int mmcc_msm8974_probe(struct platform_device *pdev)
+ {
+ 	struct regmap *regmap;
+@@ -2762,8 +2794,10 @@ static int mmcc_msm8974_probe(struct platform_device *pdev)
+ 		return PTR_ERR(regmap);
+ 
+ 	if (desc == &mmcc_msm8974_desc) {
+-		clk_pll_configure_sr_hpm_lp(&mmpll1, regmap, &mmpll1_config, true);
+-		clk_pll_configure_sr_hpm_lp(&mmpll3, regmap, &mmpll3_config, false);
++		mmcc_msm8974_configure_pll(&pdev->dev, regmap, &mmpll1,
++					   &mmpll1_config, true);
++		mmcc_msm8974_configure_pll(&pdev->dev, regmap, &mmpll3,
++					   &mmpll3_config, false);
+ 	} else {
+ 		msm8226_clock_override();
+ 	}

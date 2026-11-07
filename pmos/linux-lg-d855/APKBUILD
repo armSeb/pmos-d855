@@ -4,7 +4,7 @@
 # Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
 pkgname=linux-lg-d855
 pkgver=6.16.12
-pkgrel=10
+pkgrel=11
 pkgdesc="LG G3 (D855) mainline kernel"
 arch="armv7"
 _carch="arm"
@@ -43,6 +43,7 @@ source="
 	0001-mmc-core-add-SD-cache-quirk-for-MSSD0-microSD-cards.patch
 	0002-drm-panel-add-LG-G3-LGD-SIC-1440p-dual-DSI-video-pan.patch
 	0003-drm-sysfb-simpledrm-hold-interconnect-bandwidth.patch
+	0004-clk-qcom-mmcc-msm8974-keep-running-MMPLLs.patch
 	"
 builddir="$srcdir/linux-$_commit"
 

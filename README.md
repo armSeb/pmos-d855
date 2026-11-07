@@ -174,7 +174,10 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
 2. Affichage via le framebuffer laissé par le bootloader (simple-framebuffer +
    simpledrm) : 1440x2560 RGB888 à `0x03200000`, stride 4320 (relevé avec
-   `mdp-dump`). Dans le DTS, à tester. ← **on en est là**
+   `mdp-dump`). Deux pièges trouvés : `mmcc-msm8974` reprogrammait MMPLL1/3
+   à chaud et cassait l'affichage dans la première seconde (patch 0004), et
+   le bus multimédia (MMSS NoC) doit rester tel que le bootloader l'a réglé
+   (driver désactivé, vote BIMC par simpledrm, patch 0003). ← **on en est là**
 3. Affichage natif. Le driver du panel est écrit
    (`pmos/linux-lg-d855/0002-…patch`, compatible `lge,g3-panel-lgd-sic`)
    et le DTS décrit DSI0 + DSI1 couplés, le rétroéclairage LM3697 et le
