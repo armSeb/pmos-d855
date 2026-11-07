@@ -41,24 +41,46 @@
 	};
 
 	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
 		stdout-path = "serial0:115200n8";
 
 		/*
-		 * TODO (étape 2) : framebuffer laissé allumé par le bootloader
-		 * LG. Relever adresse, taille, stride et format sur le téléphone
-		 * avec tools/mdp-dump.sh, puis décommenter (valeurs ci-dessous =
-		 * hypothèse LK MSM8974, à confirmer) et ajouter le
-		 * reserved-memory no-map correspondant.
-		 *
-		 * framebuffer0: framebuffer@3200000 {
-		 *	compatible = "simple-framebuffer";
-		 *	reg = <0x03200000 (1440 * 2560 * 3)>;
-		 *	width = <1440>;
-		 *	height = <2560>;
-		 *	stride = <(1440 * 3)>;
-		 *	format = "r8g8b8";
-		 * };
+		 * Image laissée par le bootloader LG (relevée avec mdp-dump) :
+		 * un seul tampon 1440x2560 RGB888 à 0x03200000, stride 4320,
+		 * lu par les pipes RGB0 et RGB1 (une moitié de 720 par lien DSI).
+		 * Linux continue simplement à y écrire (simpledrm). Les horloges
+		 * et alimentations du MDP restent allumées grâce à
+		 * clk_ignore_unused / pd_ignore_unused / regulator_ignore_unused,
+		 * la bande passante mémoire grâce au vote d'interconnect.
+		 * Si le rouge et le bleu sont inversés : format = "b8g8r8"
+		 * n'existe pas, le dire et on passera par un autre format.
 		 */
+		framebuffer0: framebuffer@3200000 {
+			compatible = "simple-framebuffer";
+			reg = <0x03200000 (1440 * 2560 * 3)>;
+			memory-region = <&cont_splash_mem>;
+			/*
+			 * Garde la bande passante MDP -> DDR (patch 0003 de
+			 * simpledrm) : sans ce vote, l'interconnect la coupe et
+			 * l'écran passe au bleu (underflow du MDP5).
+			 */
+			interconnects = <&mmssnoc MNOC_MAS_MDP_PORT0 &bimc BIMC_SLV_EBI_CH0>;
+			width = <1440>;
+			height = <2560>;
+			stride = <(1440 * 3)>;
+			format = "r8g8b8";
+		};
+	};
+
+	reserved-memory {
+		/* Tampon d'affichage du bootloader, à ne pas réutiliser */
+		cont_splash_mem: framebuffer@3200000 {
+			reg = <0x03200000 (1440 * 2560 * 3)>;
+			no-map;
+		};
 	};
 
 	gpio-keys {
@@ -181,6 +203,8 @@
 		interrupts-extended = <&tlmm 73 IRQ_TYPE_EDGE_FALLING>;
 		vdd-supply = <&pm8941_l22>;
 		vio-supply = <&pm8941_lvs3>;
+		/* downstream : reset_delay = 10 ms ; marge pour le démarrage */
+		syna,startup-delay-ms = <100>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&touch_pin>;
@@ -748,8 +772,20 @@
 			pins = "gpio8";
 			function = "gpio";
 			drive-strength = <2>;
-			bias-pull-up;
+			bias-disable;
 		};
+	};
+
+	/*
+	 * Reset du tactile (actif bas). Le driver RMI4 ne gère pas de GPIO de
+	 * reset : on le maintient relâché (niveau haut), comme le downstream
+	 * après la mise sous tension.
+	 */
+	touch-reset-hog {
+		gpio-hog;
+		gpios = <8 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "touch-reset-n";
 	};
 };
 

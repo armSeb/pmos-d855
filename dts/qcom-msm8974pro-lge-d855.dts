@@ -53,7 +53,8 @@
 		 * lu par les pipes RGB0 et RGB1 (une moitié de 720 par lien DSI).
 		 * Linux continue simplement à y écrire (simpledrm). Les horloges
 		 * et alimentations du MDP restent allumées grâce à
-		 * clk_ignore_unused / pd_ignore_unused / regulator_ignore_unused.
+		 * clk_ignore_unused / pd_ignore_unused / regulator_ignore_unused,
+		 * la bande passante mémoire grâce au vote d'interconnect.
 		 * Si le rouge et le bleu sont inversés : format = "b8g8r8"
 		 * n'existe pas, le dire et on passera par un autre format.
 		 */
@@ -61,6 +62,12 @@
 			compatible = "simple-framebuffer";
 			reg = <0x03200000 (1440 * 2560 * 3)>;
 			memory-region = <&cont_splash_mem>;
+			/*
+			 * Garde la bande passante MDP -> DDR (patch 0003 de
+			 * simpledrm) : sans ce vote, l'interconnect la coupe et
+			 * l'écran passe au bleu (underflow du MDP5).
+			 */
+			interconnects = <&mmssnoc MNOC_MAS_MDP_PORT0 &bimc BIMC_SLV_EBI_CH0>;
 			width = <1440>;
 			height = <2560>;
 			stride = <(1440 * 3)>;

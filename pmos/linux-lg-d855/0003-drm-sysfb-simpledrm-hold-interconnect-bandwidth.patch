@@ -1,0 +1,141 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/sysfb: simpledrm: hold interconnect bandwidth
+
+On the LG G3 (MSM8974) the bootloader leaves the MDP5 scanning out a
+framebuffer described as simple-framebuffer. When the interconnect
+providers reach sync_state, the unclaimed MDP->DDR bandwidth is dropped,
+the display controller underflows and the panel turns blue.
+
+Vote on every path listed in an "interconnects" property of the
+simple-framebuffer node, sized for the framebuffer at 60 Hz with a 2x
+margin, for as long as simpledrm is bound.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
+index a1c311933..f2a1a21d1 100644
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -2,6 +2,7 @@
+ 
+ #include <linux/aperture.h>
+ #include <linux/clk.h>
++#include <linux/interconnect.h>
+ #include <linux/of_clk.h>
+ #include <linux/minmax.h>
+ #include <linux/of_address.h>
+@@ -225,6 +226,11 @@ struct simpledrm_device {
+ 	struct device **pwr_dom_devs;
+ 	struct device_link **pwr_dom_links;
+ #endif
++	/* interconnect paths */
++#if defined CONFIG_OF && defined CONFIG_INTERCONNECT
++	unsigned int icc_count;
++	struct icc_path **icc_paths;
++#endif
+ 
+ 	/* modesetting */
+ 	u32 formats[DRM_SYSFB_PLANE_NFORMATS(1)];
+@@ -547,6 +553,91 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
+ }
+ #endif
+ 
++#if defined CONFIG_OF && defined CONFIG_INTERCONNECT
++/*
++ * Interconnect handling
++ *
++ * The firmware-configured display controller keeps fetching the framebuffer
++ * from memory. Once the interconnect providers reach sync_state, bandwidth
++ * nobody asked for is dropped and the controller underflows. Keep a vote on
++ * every path listed in "interconnects", sized for the framebuffer at 60 Hz
++ * with some margin.
++ */
++
++static void simpledrm_device_release_icc(void *res)
++{
++	struct simpledrm_device *sdev = res;
++	unsigned int i;
++
++	for (i = 0; i < sdev->icc_count; i++)
++		icc_put(sdev->icc_paths[i]);
++}
++
++static int simpledrm_device_attach_icc(struct simpledrm_device *sdev,
++				       unsigned int stride, unsigned int height)
++{
++	struct drm_device *dev = &sdev->sysfb.dev;
++	struct device *ddev = dev->dev;
++	/* bytes per frame, 60 Hz, x2 margin, in kB/s */
++	u32 bw = (u32)min_t(u64, (u64)stride * height * 60 * 2 / 1000, U32_MAX);
++	unsigned int i;
++	int count, ret;
++
++	count = of_count_phandle_with_args(ddev->of_node, "interconnects",
++					   "#interconnect-cells");
++	if (count <= 0)
++		return 0;
++	if (count % 2) {
++		drm_warn(dev, "odd number of interconnect phandles, ignoring\n");
++		return 0;
++	}
++	count /= 2;
++
++	sdev->icc_paths = drmm_kcalloc(dev, count, sizeof(*sdev->icc_paths),
++				       GFP_KERNEL);
++	if (!sdev->icc_paths)
++		return -ENOMEM;
++
++	for (i = 0; i < count; i++) {
++		struct icc_path *path = of_icc_get_by_index(ddev, i);
++
++		if (IS_ERR(path)) {
++			ret = PTR_ERR(path);
++			if (ret == -EPROBE_DEFER)
++				goto err;
++			drm_warn(dev, "failed to get interconnect path %u: %d\n",
++				 i, ret);
++			continue;
++		}
++
++		ret = icc_set_bw(path, bw, bw);
++		if (ret) {
++			drm_warn(dev, "failed to vote on interconnect path %u: %d\n",
++				 i, ret);
++			icc_put(path);
++			continue;
++		}
++		sdev->icc_paths[sdev->icc_count++] = path;
++	}
++
++	drm_dbg(dev, "holding %u interconnect path(s) at %u kB/s\n",
++		sdev->icc_count, bw);
++
++	return devm_add_action_or_reset(ddev, simpledrm_device_release_icc, sdev);
++
++err:
++	while (sdev->icc_count--)
++		icc_put(sdev->icc_paths[sdev->icc_count]);
++	return ret;
++}
++#else
++static int simpledrm_device_attach_icc(struct simpledrm_device *sdev,
++				       unsigned int stride, unsigned int height)
++{
++	return 0;
++}
++#endif
++
+ /*
+  * Modesetting
+  */
+@@ -681,6 +772,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 			return ERR_PTR(-EINVAL);
+ 	}
+ 
++	ret = simpledrm_device_attach_icc(sdev, stride, height);
++	if (ret)
++		return ERR_PTR(ret);
++
+ 	sysfb->fb_mode = drm_sysfb_mode(width, height, width_mm, height_mm);
+ 	sysfb->fb_format = format;
+ 	sysfb->fb_pitch = stride;
