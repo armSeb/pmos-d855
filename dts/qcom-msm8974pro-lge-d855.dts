@@ -155,6 +155,8 @@
 
 		gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
+		/* downstream (wifi_bcm_lge.c) : mdelay(150) après WL_REG_ON */
+		startup-delay-us = <150000>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&wlan_regulator_pin>;
