@@ -38,21 +38,22 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 | Chargeur | bq24296 @ blsp1_i2c1 0x6b | activé | oui (`bq24190_charger`) |
 | Jauge | MAX17048 @ 0x36, IRQ TLMM 9 | activé | oui (`max17040_battery`) |
 | Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé, **testé** | oui (RMI4) |
-| WiFi | BCM4339 sur SDHC3, REG_ON TLMM 69, host-wake TLMM 44 | activé | oui (`brcmfmac`, firmware requis) |
+| WiFi | WCNSS Pronto + iris WCN3680 (interne au SoC) | activé | oui (`wcn36xx`, firmware requis) |
 | Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
 | Panel | LGD SIC 1440p, vidéo, **double DSI** | décrit, désactivé | driver écrit (patch 0002) ; **MDP5 ne gère pas le DSI couplé** |
 | GPU | Adreno 330 | désactivé (attend le panel) | oui (freedreno) |
-| Bluetooth | BCM4339, BLSP1 UART5 | absent | nœud UART à ajouter |
+| Bluetooth | WCNSS (même puce que le WiFi) | activé | oui (`btqcomsmd`, firmware requis) |
 | Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
 | Audio, capteurs, caméra, NFC | | absents | |
 
 Câblage relevé dans le noyau LineageOS
 [`android_kernel_lge_g3` (lineage-18.1)](https://github.com/LineageOS/android_kernel_lge_g3/tree/lineage-18.1/arch/arm/boot/dts/msm8974pro-g3-global_com),
 fichiers `msm8974pro-g3-global_com/*`, `msm8974pro-lge-common/*`,
-`arch/arm/mach-msm/lge/wifi_bcm_lge.c` et `8974ac-g3/board-8974-g3-*.c`.
+`arch/arm/mach-msm/lge/8974ac-g3/board-8974-g3-*.c` et `lineageos_d855_defconfig`.
 Modèles mainline : Nexus 5 (même conception LG pour l'alimentation, le
-chargeur et la jauge) et Xperia Z3 (microSD sur SDHC2, WiFi sur SDHC3).
+chargeur et la jauge), Xperia Z3 (microSD sur SDHC2) et OnePlus One
+(WiFi/BT WCNSS).
 
 ## Premier boot
 
@@ -157,13 +158,15 @@ tools/build-kernel.sh                  # zImage + DTB dans out/
 
 ## Firmwares
 
-Une fois booté, `tools/extract-firmware.sh` monte en lecture seule les
+Une fois booté, `sudo extract-firmware` (installé par `device-lg-d855`,
+source `tools/extract-firmware.sh`) monte en lecture seule les
 partitions `modem` et `system` et copie dans `/lib/firmware` :
 
 - remoteprocs Qualcomm (`mba.mbn`, `modem.mdt`/`.bXX`, `adsp.*`, `venus.*`),
   rangés dans `qcom/msm8974/lge/d855/` ;
-- WiFi : `brcm/brcmfmac4339-sdio.bin` et la NVRAM renommée
-  `brcm/brcmfmac4339-sdio.lge,d855.txt` (nom dérivé du compatible du DTS) ;
+- WiFi/BT : `wcnss.mdt`/`.bXX` (partition `modem`) et la calibration
+  `WCNSS_qcom_wlan_nv.bin` (`system/etc/firmware/wlan/prima/`), dans le même
+  dossier (chemins fixés par `firmware-name` dans le DTS) ;
 - microcode Adreno 330 si nécessaire.
 
 À terme : paquet `firmware-lg-d855` ou `msm-firmware-loader`.
@@ -193,6 +196,7 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 ## Remarque sur les révisions matérielles
 
 Le downstream gère des révisions de carte (`evb1` à `rev_12`). Le DTS vise
-les téléphones commerciaux (rev ≥ 1.0) : microSD sur SDHC2, WiFi sur SDHC3,
+les téléphones commerciaux (rev ≥ 1.0) : microSD sur SDHC2, WiFi/BT par le
+WCNSS interne (pas de SDIO : « WIFI doesn't use any sdcc from rev_b »),
 chargeur bq24296, LM3697 sur HVLED1+2. Les prototypes `rev_a` et antérieurs
 sont câblés différemment.

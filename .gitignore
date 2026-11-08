@@ -5,3 +5,4 @@
 /pmos/linux-lg-d855/qcom-msm8974pro-lge-d855.dts
 /pmos/device-lg-d855/devmem32.c
 /pmos/device-lg-d855/mdp-dump.sh
+/pmos/device-lg-d855/extract-firmware.sh

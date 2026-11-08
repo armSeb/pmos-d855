@@ -4,13 +4,16 @@
  *
  * Squelette de bring-up. Base : qcom-msm8974-lge-nexus5-hammerhead.dts
  * (même équipe LG, même architecture d'alimentation) et
- * qcom-msm8974pro-sony-xperia-shinano-common.dtsi (microSD sur SDHC2,
- * WiFi BCM4339 sur SDHC3).
+ * qcom-msm8974pro-sony-xperia-shinano-common.dtsi (microSD sur SDHC2).
+ * WiFi/BT : WCNSS Pronto + iris WCN3680 interne, comme
+ * qcom-msm8974pro-oneplus-bacon.dts (les révisions de série rev_b+ n'ont
+ * pas de BCM4339 : « WIFI doesn't use any sdcc from rev_b » dans le DTS
+ * downstream, CONFIG_WCNSS_CORE_PRONTO=y et CONFIG_BT_HCISMD=y).
  *
  * Câblage relevé dans le noyau downstream LineageOS (lineage-18.1) :
  *   arch/arm/boot/dts/msm8974pro-g3-global_com/
  *   arch/arm/boot/dts/msm8974pro-lge-common/
- *   arch/arm/mach-msm/lge/wifi_bcm_lge.c, 8974ac-g3/board-8974-g3-*.c
+ *   arch/arm/mach-msm/lge/8974ac-g3/board-8974-g3-*.c
  *
  * Les éléments marqués TODO ne sont pas encore validés sur le matériel.
  */
@@ -36,7 +39,6 @@
 	aliases {
 		mmc0 = &sdhc_1;		/* eMMC */
 		mmc1 = &sdhc_2;		/* microSD */
-		mmc2 = &sdhc_3;		/* WiFi SDIO */
 		serial0 = &blsp1_uart1;
 	};
 
@@ -145,22 +147,6 @@
 		regulator-always-on;
 	};
 
-	/* WL_REG_ON = TLMM 69 (wifi_bcm_lge.c : WLAN_POWER) */
-	vreg_wlan: wlan-regulator {
-		compatible = "regulator-fixed";
-
-		regulator-name = "wl-reg";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-
-		gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-		/* downstream (wifi_bcm_lge.c) : mdelay(150) après WL_REG_ON */
-		startup-delay-us = <150000>;
-
-		pinctrl-names = "default";
-		pinctrl-0 = <&wlan_regulator_pin>;
-	};
 };
 
 /* Chargeur bq24296 + jauge MAX17048 (même bus et mêmes IRQ que le Nexus 5) */
@@ -283,12 +269,6 @@
 };
 
 /*
- * TODO : Bluetooth BCM4339 sur BLSP1 UART5 (0xf9921000, GPIO 23-26),
- * reset TLMM 41, host-wake TLMM 42, dev-wake TLMM 62.
- * Le nœud UART n'existe pas encore dans qcom-msm8974.dtsi.
- */
-
-/*
  * Affichage : panel LGD SIC 1440x2560 vidéo, en DSI couplé (« bonded ») :
  * moitié gauche sur DSI0, moitié droite sur DSI1, 720x2560 et 4 lanes
  * chacun, commandes envoyées sur les deux liens. Driver :
@@ -400,14 +380,6 @@
 		power-source = <PM8941_GPIO_S3>;
 	};
 
-	wlan_sleep_clk_pin: wl-sleep-clk-state {
-		pins = "gpio16";
-		function = "func2";
-
-		output-high;
-		power-source = <PM8941_GPIO_S3>;
-	};
-
 	/* Reset du panel (downstream : qcom,platform-reset-gpio) */
 	panel_reset_pin: panel-reset-state {
 		pins = "gpio19";
@@ -424,6 +396,40 @@
 		gpios = <35 GPIO_ACTIVE_HIGH>;
 		output-high;
 		line-name = "otg-gpio";
+	};
+};
+
+/*
+ * WiFi + Bluetooth : WCNSS (Pronto) + iris WCN3680. Alimentations identiques
+ * au msm8974.dtsi downstream (qcom,wcnss-wlan@fb000000, non surchargé par le
+ * G3). Firmware : wcnss.mdt/.bXX (partition modem) et WCNSS_qcom_wlan_nv.bin.
+ */
+&pronto {
+	vddmx-supply = <&pm8841_s1>;
+	vddpx-supply = <&pm8941_s3>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&wcnss_pin_a>;
+
+	firmware-name = "qcom/msm8974/lge/d855/wcnss.mdt";
+
+	status = "okay";
+
+	iris {
+		vddxo-supply = <&pm8941_l6>;
+		vddrfa-supply = <&pm8941_l11>;
+		vddpa-supply = <&pm8941_l19>;
+		vdddig-supply = <&pm8941_s3>;
+	};
+
+	smd-edge {
+		qcom,remote-pid = <4>;
+		label = "pronto";
+
+		wcnss {
+			firmware-name = "qcom/msm8974/lge/d855/WCNSS_qcom_wlan_nv.bin";
+			status = "okay";
+		};
 	};
 };
 
@@ -665,37 +671,6 @@
 	pinctrl-1 = <&sdc2_off>;
 };
 
-/* WiFi BCM4339 en SDIO, host-wake TLMM 44 */
-&sdhc_3 {
-	status = "okay";
-
-	max-frequency = <100000000>;
-	vmmc-supply = <&vreg_wlan>;
-	vqmmc-supply = <&pm8941_s3>;
-	non-removable;
-
-	/*
-	 * L'horloge 32 kHz (PM8941 GPIO16) doit tourner avant la mise sous
-	 * tension de la BCM4339 : elle est donc liée au contrôleur, pas au
-	 * nœud wifi (appliqué seulement après l'énumération de la carte).
-	 */
-	pinctrl-names = "default";
-	pinctrl-0 = <&sdc3_on>, <&wlan_sleep_clk_pin>;
-
-	wifi@1 {
-		compatible = "brcm,bcm4339-fmac", "brcm,bcm4329-fmac";
-		reg = <1>;
-
-		brcm,drive-strength = <10>;
-
-		interrupts-extended = <&tlmm 44 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "host-wake";
-
-		pinctrl-names = "default";
-		pinctrl-0 = <&wlan_hostwake_pin>;
-	};
-};
-
 &tlmm {
 	sdc1_on: sdc1-on-state {
 		clk-pins {
@@ -736,42 +711,21 @@
 		};
 	};
 
-	sdc3_on: sdc3-on-state {
-		clk-pins {
-			pins = "gpio40";
-			function = "sdc3";
-			drive-strength = <10>;
-			bias-disable;
+	/* downstream : gpios 36..40 de qcom,wcnss-wlan */
+	wcnss_pin_a: wcnss-pin-active-state {
+		wlan-pins {
+			pins = "gpio36", "gpio37", "gpio38", "gpio39", "gpio40";
+			function = "wlan";
+			drive-strength = <6>;
+			bias-pull-down;
 		};
 
-		cmd-pins {
-			pins = "gpio39";
-			function = "sdc3";
-			drive-strength = <10>;
-			bias-pull-up;
+		bt-pins {
+			pins = "gpio35", "gpio43", "gpio44";
+			function = "bt";
+			drive-strength = <2>;
+			bias-pull-down;
 		};
-
-		data-pins {
-			pins = "gpio35", "gpio36", "gpio37", "gpio38";
-			function = "sdc3";
-			drive-strength = <10>;
-			bias-pull-up;
-		};
-	};
-
-	wlan_regulator_pin: wl-reg-active-state {
-		pins = "gpio69";
-		function = "gpio";
-		drive-strength = <2>;
-		bias-pull-down;
-	};
-
-	wlan_hostwake_pin: wl-hostwake-state {
-		pins = "gpio44";
-		function = "gpio";
-		drive-strength = <2>;
-		bias-disable;
-		input-enable;
 	};
 
 	fuelgauge_pin: fuelgauge-int-state {

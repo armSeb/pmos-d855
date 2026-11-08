@@ -3,29 +3,33 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=4
+pkgrel=5
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
 options="!check !archcheck"
 # Outils de bring-up : bus I2C (i2c-tools), GPIO (libgpiod), entrées
-# (evtest), USB (usbutils), WiFi (iw), traçage (strace).
+# (evtest), USB (usbutils), WiFi (iw, wpa_supplicant), BT (bluez),
+# traçage (strace).
 depends="
 	linux-lg-d855
 	mkbootimg
 	postmarketos-base
 	evtest
 	i2c-tools
+	bluez
 	iw
 	libgpiod
 	strace
 	usbutils
+	wpa_supplicant
 	"
 makedepends="devicepkg-dev"
 source="
 	deviceinfo
 	devmem32.c
 	mdp-dump.sh
+	extract-firmware.sh
 	"
 
 build() {
@@ -39,6 +43,7 @@ package() {
 
 	install -Dm755 devmem32 "$pkgdir"/usr/bin/devmem32
 	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
+	install -Dm755 "$srcdir"/extract-firmware.sh "$pkgdir"/usr/bin/extract-firmware
 }
 
 # Sommes générées par : pmbootstrap checksum device-lg-d855
