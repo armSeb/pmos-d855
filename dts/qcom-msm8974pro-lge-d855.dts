@@ -349,7 +349,12 @@
 
 	qcom,dual-dsi-mode;
 	qcom,master-dsi;
-	qcom,sync-dual-dsi;
+	/*
+	 * Essai sans qcom,sync-dual-dsi : commandes envoyées séparément sur
+	 * chaque lien (et relues sur chacun) au lieu d'un déclenchement
+	 * synchronisé en broadcast. En sync, les lectures par DSI1 renvoient
+	 * toujours 0x00, même l'ID du panneau.
+	 */
 
 	status = "okay";
 
@@ -409,7 +414,6 @@
 	vddio-supply = <&pm8941_l12>;
 
 	qcom,dual-dsi-mode;
-	qcom,sync-dual-dsi;
 
 	/*
 	 * Interruption MDSS de DSI1 : bit 5 (MDSS_INTR_DSI1 en downstream).

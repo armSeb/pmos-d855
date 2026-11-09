@@ -53,6 +53,13 @@ Piste : le DT LG alimente le panneau par `vdd-supply = <&pm8941_l10>` (1,8 V,
 seul consommateur de L10) en plus de L12 ; notre DTS n'en faisait rien.
 pkgrel 26 : L10 fixé à 1,8 V et toujours allumé.
 
+pkgrel 26 (L10) : aucun changement. pkgrel 27 : en sync, toutes les
+lectures par DSI1 renvoient 0x00 (réponse DCS courte valide, ECC correct),
+y compris l'ID 0xda-0xdc, avant reset, après reset et après init : la
+relecture par DSI1 ne renseigne pas sur l'état du panneau.
+pkgrel 28 : essai sans `qcom,sync-dual-dsi` (commandes envoyées et relues
+séparément sur chaque lien, broadcast inactif).
+
 Pistes suivantes si 0x9c n'apparaît pas :
 - comparer la séquence d'init du panel avec le downstream (mode LP, délais,
   ordre reset/alims) ;
