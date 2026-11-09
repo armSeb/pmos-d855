@@ -39,7 +39,7 @@ form:
 Command mode split display is not implemented.
 
 diff --git a/drivers/gpu/drm/msm/disp/mdp5/mdp5_crtc.c b/drivers/gpu/drm/msm/disp/mdp5/mdp5_crtc.c
-index 0f653e62b..e3725ff72 100644
+index 0f653e62b..d02f36e2f 100644
 --- a/drivers/gpu/drm/msm/disp/mdp5/mdp5_crtc.c
 +++ b/drivers/gpu/drm/msm/disp/mdp5/mdp5_crtc.c
 @@ -102,6 +102,33 @@ static u32 crtc_flush(struct drm_crtc *crtc, u32 flush_mask)
@@ -175,7 +175,17 @@ index 0f653e62b..e3725ff72 100644
  		mdp5_write(mdp5_kms, REG_MDP5_LM_BLEND_COLOR_OUT(r_lm), val);
  	}
  
-@@ -601,7 +681,8 @@ static int mdp5_crtc_setup_pipeline(struct drm_crtc *crtc,
+@@ -545,7 +625,8 @@ static void mdp5_crtc_atomic_enable(struct drm_crtc *crtc,
+ 
+ 	pm_runtime_get_sync(dev);
+ 
+-	if (mdp5_crtc->lm_cursor_enabled) {
++	/* LM cursors are not supported with a right mixer (see cursor_set) */
++	if (mdp5_crtc->lm_cursor_enabled && !mdp5_cstate->pipeline.r_mixer) {
+ 		/*
+ 		 * Restore LM cursor state, as it might have been lost
+ 		 * with suspend:
+@@ -601,7 +682,8 @@ static int mdp5_crtc_setup_pipeline(struct drm_crtc *crtc,
  		int ret;
  
  		caps = MDP_LM_CAP_DISPLAY;
@@ -185,7 +195,7 @@ index 0f653e62b..e3725ff72 100644
  			caps |= MDP_LM_CAP_PAIR;
  
  		ret = mdp5_mixer_assign(new_crtc_state->state, crtc, caps,
-@@ -631,6 +712,8 @@ static int mdp5_crtc_setup_pipeline(struct drm_crtc *crtc,
+@@ -631,6 +713,8 @@ static int mdp5_crtc_setup_pipeline(struct drm_crtc *crtc,
  	intf = pipeline->intf;
  
  	mdp5_cstate->err_irqmask = intf2err(intf->num);
@@ -194,7 +204,7 @@ index 0f653e62b..e3725ff72 100644
  	mdp5_cstate->vblank_irqmask = intf2vblank(pipeline->mixer, intf);
  
  	if ((intf->type == INTF_DSI) &&
-@@ -749,6 +832,19 @@ static int mdp5_crtc_atomic_check(struct drm_crtc *crtc,
+@@ -749,6 +833,19 @@ static int mdp5_crtc_atomic_check(struct drm_crtc *crtc,
  	if (mode->hdisplay > hw_cfg->lm.max_width)
  		need_right_mixer = true;
  
@@ -214,7 +224,7 @@ index 0f653e62b..e3725ff72 100644
  	ret = mdp5_crtc_setup_pipeline(crtc, crtc_state, need_right_mixer);
  	if (ret) {
  		DRM_DEV_ERROR(dev->dev, "couldn't assign mixers %d\n", ret);
-@@ -1270,6 +1366,15 @@ void mdp5_crtc_set_pipeline(struct drm_crtc *crtc)
+@@ -1270,6 +1367,15 @@ void mdp5_crtc_set_pipeline(struct drm_crtc *crtc)
  	/* should this be done elsewhere ? */
  	mdp_irq_update(&mdp5_kms->base);
  
