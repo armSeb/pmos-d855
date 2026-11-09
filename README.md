@@ -156,6 +156,31 @@ DTB_ONLY=1 tools/build-kernel.sh       # vérifie le DTS en quelques secondes
 tools/build-kernel.sh                  # zImage + DTB dans out/
 ```
 
+## Démarrage autonome (sans PC)
+
+lk2nd ne sait pas lire la microSD : le noyau pmOS est donc écrit dans la
+partition `boot` de l'eMMC, juste derrière lk2nd (à +512 KiB). La racine
+reste sur la microSD.
+
+- `lk2nd-flash-boot` (paquet `device-lg-d855`) copie `/boot/boot.img` à cet
+  endroit. Il vérifie avant d'écrire que lk2nd est bien en tête, que l'image
+  tient dans la partition, et il relit après écriture.
+- `lk2nd-flash-boot.path` le relance chaque fois que mkinitfs régénère
+  `/boot/boot.img` (`apk upgrade`, `pmos/update.sh`). Un simple `reboot`
+  démarre alors le nouveau noyau.
+- LineageOS ne démarre plus tant que son `boot.img` (sauvegardé par
+  `tools/flash-lk2nd.sh` dans `backups/`) n'est pas remis :
+  `fastboot flash boot backups/<…>boot.img` depuis lk2nd.
+- Secours si un noyau ne démarre pas : Vol− au démarrage → fastboot lk2nd →
+  `fastboot boot <boot.img qui marche>`.
+
+Activation sur un téléphone déjà installé :
+
+```
+sudo systemctl enable --now lk2nd-flash-boot.path
+sudo lk2nd-flash-boot
+```
+
 ## Firmwares
 
 Une fois booté, `sudo extract-firmware` (installé par `device-lg-d855`,

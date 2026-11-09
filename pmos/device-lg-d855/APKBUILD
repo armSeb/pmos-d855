@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=6
+pkgrel=7
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
@@ -30,6 +30,10 @@ source="
 	devmem32.c
 	mdp-dump.sh
 	extract-firmware.sh
+	lk2nd-flash-boot
+	lk2nd-flash-boot.service
+	lk2nd-flash-boot.path
+	90-lg-d855.preset
 	"
 
 build() {
@@ -44,6 +48,14 @@ package() {
 	install -Dm755 devmem32 "$pkgdir"/usr/bin/devmem32
 	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
 	install -Dm755 "$srcdir"/extract-firmware.sh "$pkgdir"/usr/bin/extract-firmware
+
+	# Démarrage autonome : recopie /boot/boot.img derrière lk2nd à chaque
+	# régénération (lk2nd ne lit pas la microSD).
+	install -Dm755 "$srcdir"/lk2nd-flash-boot "$pkgdir"/usr/sbin/lk2nd-flash-boot
+	install -Dm644 -t "$pkgdir"/usr/lib/systemd/system \
+		"$srcdir"/lk2nd-flash-boot.service "$srcdir"/lk2nd-flash-boot.path
+	install -Dm644 "$srcdir"/90-lg-d855.preset \
+		"$pkgdir"/usr/lib/systemd/system-preset/90-lg-d855.preset
 }
 
 # Sommes générées par : pmbootstrap checksum device-lg-d855

@@ -1,0 +1,7 @@
+[Unit]
+Description=Copie /boot/boot.img derrière lk2nd (partition boot)
+ConditionPathExists=/boot/boot.img
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/lk2nd-flash-boot

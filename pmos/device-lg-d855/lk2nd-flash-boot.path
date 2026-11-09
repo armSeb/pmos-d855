@@ -1,0 +1,8 @@
+[Unit]
+Description=Surveille /boot/boot.img pour le recopier derrière lk2nd
+
+[Path]
+PathChanged=/boot/boot.img
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,56 @@
+#!/bin/sh
+# Copie /boot/boot.img derrière lk2nd, dans la partition boot de l'eMMC.
+#
+# Sur le G3, la partition boot contient lk2nd (bumpé) sur ses 512 premiers
+# KiB, puis l'image que lk2nd démarre (LK2ND_PARTITION_SIZE = 512 KiB).
+# lk2nd ne sait pas lire la microSD : le noyau pmOS doit donc être écrit à
+# cet endroit pour que le téléphone démarre seul sur pmOS.
+#
+# Lancé automatiquement par lk2nd-flash-boot.path quand mkinitfs régénère
+# /boot/boot.img (apk upgrade, sideload). Si le nouveau noyau ne démarre
+# pas : maintenir Vol− au démarrage pour rester dans lk2nd, puis
+# fastboot boot <ancien boot.img>.
+#
+# Usage : lk2nd-flash-boot [image]   (défaut /boot/boot.img)
+set -eu
+
+img=${1:-/boot/boot.img}
+part=/dev/disk/by-partlabel/boot
+off=$((512 * 1024))
+
+log() { echo "lk2nd-flash-boot: $*"; }
+fail() { log "ERREUR : $*" >&2; exit 1; }
+magic() { dd if="$1" bs=1 skip="$2" count=8 2>/dev/null; }
+
+[ "$(id -u)" = 0 ] || fail "à lancer en root"
+[ -f "$img" ] || fail "$img introuvable"
+[ -b "$part" ] || fail "$part introuvable"
+
+# Garde-fous : on n'écrit que si lk2nd est bien en tête de la partition.
+[ "$(magic "$img" 0)" = "ANDROID!" ] || fail "$img n'est pas une image de boot Android"
+[ "$(magic "$part" 0)" = "ANDROID!" ] || fail "pas d'image de boot au début de $part"
+dd if="$part" bs=4096 count=128 2>/dev/null | grep -q lk2nd \
+	|| fail "lk2nd absent des 512 premiers KiB de $part : rien n'est écrit"
+
+size=$(stat -c %s "$img")
+psize=$(blockdev --getsize64 "$part")
+[ $((off + size)) -le "$psize" ] \
+	|| fail "$img trop gros ($size octets, place disponible $((psize - off)))"
+
+# Rien à faire si l'image en place est déjà la même.
+cur=$(dd if="$part" bs=4096 skip=128 count=$(((size + 4095) / 4096)) 2>/dev/null \
+	| head -c "$size" | sha256sum | cut -d' ' -f1)
+new=$(sha256sum "$img" | cut -d' ' -f1)
+if [ "$cur" = "$new" ]; then
+	log "image déjà en place ($new)"
+	exit 0
+fi
+
+log "écriture de $img ($size octets) dans $part à +512 KiB"
+dd if="$img" of="$part" bs=4096 seek=128 conv=fsync 2>/dev/null
+sync
+
+cur=$(dd if="$part" bs=4096 skip=128 count=$(((size + 4095) / 4096)) 2>/dev/null \
+	| head -c "$size" | sha256sum | cut -d' ' -f1)
+[ "$cur" = "$new" ] || fail "relecture différente après écriture"
+log "OK, prochain démarrage sur ce noyau"
