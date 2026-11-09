@@ -201,3 +201,16 @@ Piste pour plus tard : CLK_OPS_PARENT_ENABLE sur les RCG byte/pclk de
 mmcc-msm8974.
 Compilation vérifiée hors pmbootstrap : panel-lge-g3-lgd-sic.o et
 leds-lm3697.o sans avertissement.
+
+Sous Phosh (r37) : devfreq OK (simple_ondemand, 320 MHz sous charge).
+Problèmes vus et corrigés en r38 / device r18 :
+- « get_pages: -28 » (ENOSPC) puis GL_OUT_OF_MEMORY dans phoc et disparition
+  du bureau : carveout VRAM de 128 Mo épuisée (sans IOMMU, tous les tampons y
+  vont ; 14,7 Mo par tampon 1440p). CMA 512 Mo + `vram=384m`.
+- Écran qui ne se rallume pas après extinction (bouton power) : unprepare
+  coupait VSP/VSN, et le panneau ne revient pas d'un cycle VSP/VSN (même
+  constat que init_steps 15). unprepare garde désormais VDD/VSP/VSN et ne
+  fait que display off + sleep in + reset ; le prepare suivant fait reset +
+  table + on.
+Hors noyau : phosh-osk-stevia plante en boucle (« Settings schema
+'mobi.phosh.osk' is not installed ») : schéma GSettings manquant.

@@ -47,7 +47,7 @@ new file mode 100644
 index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,489 @@
+@@ -0,0 +1,507 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -87,6 +87,7 @@ index 000000000..769649da0
 +	struct regulator_bulk_data supplies[ARRAY_SIZE(lgd_sic_supply_names)];
 +	struct gpio_desc *reset_gpio;
 +	bool dsv_cycled;
++	bool rails_on;
 +};
 +
 +static inline struct lgd_sic *to_lgd_sic(struct drm_panel *panel)
@@ -309,6 +310,14 @@ index 000000000..769649da0
 +	if (steps & LGD_SIC_STEP_RESET)
 +		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 +
++	/*
++	 * Rails already up (screen unblank): unprepare keeps them on, since
++	 * the panel does not come back from a VSP/VSN power cycle. Reset,
++	 * table and sleep out/display on are enough.
++	 */
++	if (ctx->rails_on)
++		goto rails_up;
++
 +	ret = regulator_enable(vdd);
 +	if (ret < 0) {
 +		dev_err(dev, "Failed to enable vdd: %d\n", ret);
@@ -353,6 +362,15 @@ index 000000000..769649da0
 +	usleep_range(500, 1000);
 +	regulator_sync_voltage(vsn);
 +	usleep_range(10000, 11000);
++	ctx->rails_on = true;
++
++rails_up:
++	if (ctx->rails_on && (steps & LGD_SIC_STEP_RESET) &&
++	    gpiod_get_value_cansleep(ctx->reset_gpio)) {
++		/* reset held since unprepare: release it, vendor delay */
++		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++		usleep_range(5000, 6000);
++	}
 +
 +	if (!(steps & (LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON))) {
 +		lgd_sic_dump_power_mode(ctx, "kept");
@@ -363,17 +381,16 @@ index 000000000..769649da0
 +
 +	ret = lgd_sic_on(ctx, steps);
 +	if (ret < 0) {
++		/* rails stay on (rails_on): only the reset goes back */
 +		dev_err(dev, "Failed to initialize panel: %d\n", ret);
 +		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+		goto err_vsn;
++		return ret;
 +	}
 +
 +	lgd_sic_dump_power_mode(ctx, "after init");
 +
 +	return 0;
 +
-+err_vsn:
-+	regulator_disable(vsn);
 +err_vsp:
 +	regulator_disable(vsp);
 +err_vdd:
@@ -391,10 +408,11 @@ index 000000000..769649da0
 +	if (ret < 0)
 +		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 +
++	/*
++	 * Keep VDD/VSP/VSN on: after a VSP/VSN power cycle the panel stays
++	 * black (init_steps bit 0). Sleep in + reset is the low-power state.
++	 */
 +	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+	regulator_disable(ctx->supplies[2].consumer);
-+	regulator_disable(ctx->supplies[1].consumer);
-+	regulator_disable(ctx->supplies[0].consumer);
 +
 +	return 0;
 +}

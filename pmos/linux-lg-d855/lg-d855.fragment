@@ -68,3 +68,8 @@ CONFIG_MSM_GCC_8974=y
 # reste à la fréquence choisie par défaut (table OPP 27/200/320 MHz du dtsi)
 CONFIG_PM_DEVFREQ=y
 CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+# Sans IOMMU, tous les tampons GPU/affichage viennent de la carveout VRAM de
+# msm, prise dans le CMA : 1440x2560 en 32 bits = 14,7 Mo par tampon, 128 Mo
+# s'épuisent sous Phosh (« could not get pages: -28 »). CMA 512 Mo, vram=384m
+# (modprobe.d du paquet device).
+CONFIG_CMA_SIZE_MBYTES=512
