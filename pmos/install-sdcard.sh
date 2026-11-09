@@ -2,42 +2,45 @@
 # Installe postmarketOS (noyau mainline) pour le LG G3 D855 sur une carte
 # microSD, de façon reproductible. Android reste intact sur l'eMMC.
 #
-#   pmos/install-sdcard.sh /dev/sdX            # UI par défaut : console
-#   UI=phosh pmos/install-sdcard.sh /dev/sdX   # une fois l'affichage fonctionnel
+#   pmos/install-sdcard.sh /dev/sdX              # UI par défaut : Phosh
+#   UI=console pmos/install-sdcard.sh /dev/sdX   # sans interface graphique
+#   EXTRA="gnome-maps loupe" pmos/install-sdcard.sh /dev/sdX   # paquets en plus
 #   APORTS=~/src/pmaports pmos/install-sdcard.sh /dev/sdX   # clone pmaports ailleurs
 #
 # Prérequis : pmbootstrap installé, `pmbootstrap init` lancé au moins une fois
 # (n'importe quel appareil : il sert à créer la config et le clone pmaports) ;
 # sgdisk (paquet gdisk), sfdisk/findmnt (util-linux), e2fsprogs.
 #
-# Démarrage : lk2nd est flashé dans la partition boot de l'eMMC ; le noyau et
-# l'initramfs sont envoyés par USB (`pmbootstrap flasher boot`, équivalent de
-# `fastboot boot`) et trouvent la racine sur la carte par son label pmOS_root.
+# Démarrage : lk2nd (patché pour lire la microSD, tools/build-lk2nd.sh) est
+# flashé dans la partition boot de l'eMMC ; il lit extlinux/extlinux.conf sur
+# pmOS_boot et démarre pmOS seul. Carte absente → Android derrière lk2nd.
 #
 # Étapes :
 #   1. vérifie la carte (disque entier, pas monté, < 64 Go) et demande confirmation ;
 #   2. met à jour le clone pmaports (origin/main doit exister) ;
 #   3. copie les paquets du dépôt dans pmaports/device/testing (sync.sh) et calcule les sommes ;
-#   4. sélectionne l'appareil et l'UI dans la config pmbootstrap ;
+#   4. sélectionne l'appareil, l'UI et les paquets en plus dans la config
+#      pmbootstrap (les applications recommandées par l'UI sont installées) ;
 #   5. pmbootstrap install --sdcard : partitionne et remplit directement la carte
-#      (table GPT, pmOS_boot + pmOS_root sur toute la carte) ;
+#      (table MBR, deviceinfo_partition_type="msdos", lue par lk2nd ;
+#      pmOS_boot en ext2 + pmOS_root sur toute la carte) ;
 #   6. vérifie sur la carte que pmOS_boot contient boot.img, vmlinuz et initramfs ;
 #   7. affiche la commande de démarrage.
 #
-# Contrairement à la Maxwell, aucune conversion de table n'est nécessaire (le
-# noyau lit la GPT, lk2nd ne lit pas la carte) : pmbootstrap écrit la carte
-# lui-même.
+# Aucune conversion de table après coup : le deviceinfo demande déjà une
+# table MBR à pmbootstrap, qui écrit la carte lui-même.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 dev=${1:-}
-ui=${UI:-console}
+ui=${UI:-phosh}
+extra=${EXTRA:-}
 device=lg-d855
 
 die() { echo "ERREUR : $*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 
-[ -n "$dev" ] || die "usage : $0 /dev/sdX   (variable UI=… facultative, défaut console)"
+[ -n "$dev" ] || die "usage : $0 /dev/sdX   (variables UI=… et EXTRA=… facultatives, UI par défaut phosh)"
 command -v pmbootstrap >/dev/null || die "pmbootstrap introuvable"
 for t in lsblk blkid sfdisk sgdisk findmnt partx dd e2fsck resize2fs; do
 	command -v "$t" >/dev/null || die "$t introuvable (util-linux, gdisk, coreutils, e2fsprogs)"
@@ -86,6 +89,12 @@ pmbootstrap checksum "linux-$device" "device-$device"
 step "Configuration : device=$device, ui=$ui"
 pmbootstrap config device "$device"
 pmbootstrap config ui "$ui"
+# Paquets en plus (liste séparée par des virgules pour pmbootstrap), ou aucun
+if [ -n "$extra" ]; then
+	pmbootstrap config extra_packages "$(echo "$extra" | tr -s ' ' ',')"
+else
+	pmbootstrap config extra_packages none
+fi
 # Changer d'UI peut changer de canal (systemd-edge pour phosh) : des chroots
 # créés pour un autre canal font échouer l'installation. On les supprime
 # (seulement les chroots : paquets construits et caches conservés).
@@ -112,7 +121,7 @@ cleanup() { sudo umount "$mnt" 2>/dev/null || true; rmdir "$mnt" 2>/dev/null || 
 trap cleanup EXIT
 sudo mount -o ro "$bootp" "$mnt"
 ok=1
-for f in boot.img vmlinuz initramfs; do
+for f in boot.img vmlinuz initramfs extlinux/extlinux.conf; do
 	if [ -s "$mnt/$f" ]; then
 		printf '  %-10s %s octets\n' "$f" "$(stat -c %s "$mnt/$f")"
 	else
@@ -127,12 +136,11 @@ sudo sfdisk -l "$dev" | sed -n '/^Device/,$p'
 # --- 7. démarrage -----------------------------------------------------------
 step "Carte prête"
 cat <<'EOF'
-1. Insérer la carte dans le G3, le démarrer en maintenant Vol− : lk2nd reste
-   en fastboot (sinon il démarre l'Android flashé derrière lui).
-   Vérifier côté PC : fastboot devices
-2. Envoyer le noyau, sans rien flasher :
-     pmbootstrap flasher boot
-3. Réseau USB : ssh user@172.16.42.1
-   En cas d'échec avant la racine : pmbootstrap flasher boot --cmdline pmos.debug-shell
+1. Insérer la carte dans le G3 et le démarrer : lk2nd lit extlinux.conf sur
+   la carte et démarre pmOS (Phosh) sans PC.
+2. Réseau USB : ssh user@172.16.42.1 (ou le WiFi une fois configuré).
+3. En cas d'échec avant la racine : démarrer en maintenant Vol− (lk2nd reste
+   en fastboot), puis depuis le PC :
+     pmbootstrap flasher boot --cmdline pmos.debug-shell
    puis telnet 172.16.42.1
 EOF

@@ -98,7 +98,7 @@ Le bump seul : `tools/lg-bump.py lk2nd.img`.
 
 ```sh
 pmbootstrap init                       # une fois, n'importe quel appareil
-pmos/install-sdcard.sh /dev/sdX        # UI console par défaut ; UI=phosh plus tard
+pmos/install-sdcard.sh /dev/sdX        # Phosh par défaut ; UI=console, EXTRA="paquets"
 ```
 
 Le script met à jour pmaports, y copie les paquets du dépôt (en retirant
