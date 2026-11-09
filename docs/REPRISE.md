@@ -214,3 +214,10 @@ Problèmes vus et corrigés en r38 / device r18 :
   table + on.
 Hors noyau : phosh-osk-stevia plante en boucle (« Settings schema
 'mobi.phosh.osk' is not installed ») : schéma GSettings manquant.
+
+GPU : blocages « hangcheck detected gpu lockup » causés par
+gnome-control-center (GTK4), y compris à fréquence GPU fixe (pas devfreq).
+`GSK_RENDERER=cairo` : plus aucun blocage (le moteur « gl » n'existe plus
+dans GTK, seul « ngl » reste, et il bloque l'A330). device-lg-d855 r19 :
+GSK_RENDERER=cairo dans /etc/profile.d et /usr/lib/environment.d (services
+utilisateur systemd/D-Bus). À revoir quand Mesa/freedreno a3xx progresse.

@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=18
+pkgrel=19
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
@@ -37,6 +37,8 @@ source="
 	mdss-snapshot.sh
 	modprobe-lg-d855.conf
 	modules-load-lg-d855.conf
+	adreno-a330-quirks.sh
+	adreno-a330-quirks.conf
 	"
 
 build() {
@@ -55,6 +57,11 @@ package() {
 	install -Dm755 "$srcdir"/mdss-snapshot.sh "$pkgdir"/usr/bin/mdss-snapshot
 	install -Dm644 "$srcdir"/modprobe-lg-d855.conf "$pkgdir"/etc/modprobe.d/lg-d855.conf
 	install -Dm644 "$srcdir"/modules-load-lg-d855.conf "$pkgdir"/etc/modules-load.d/lg-d855.conf
+	# GTK4 en rendu cairo : son moteur GL bloque l'Adreno 330
+	install -Dm644 "$srcdir"/adreno-a330-quirks.sh \
+		"$pkgdir"/etc/profile.d/adreno-a330-quirks.sh
+	install -Dm644 "$srcdir"/adreno-a330-quirks.conf \
+		"$pkgdir"/usr/lib/environment.d/50-adreno-a330-quirks.conf
 
 	# Secours si lk2nd ne lit pas la microSD : recopie /boot/boot.img
 	# derrière lk2nd (désactivé par défaut, voir README).
