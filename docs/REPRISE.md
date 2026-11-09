@@ -34,6 +34,18 @@ Test :
 dmesg | grep -i -E "power mode|lgd|dsi|panel" | grep -v "dependency cycle"
 ```
 
+pkgrel 24 : la lecture marche (« power mode: 0x00 (0) ») mais le panel répond
+0x00, avec `dsi_err_worker: status=6` (erreurs PHY lane 0 + FIFO).
+Constat dans le DT LG downstream : la séquence d'init ne contient ni 0x11
+(sleep out) ni 0x29 (display on) ; ordre d'alim : vdd, ENP, reset <1 5>,
+puis ENN, avec reprogrammation I2C du TPS65132 après chaque enable ; reset
+fait après l'init du DSI en LP11 (lp11-init).
+
+pkgrel 25 : paramètre `keep_init` du pilote panel
+(`options panel-lge-g3-lgd-sic keep_init=1`) : garde le panel tel que le
+bootloader l'a laissé, sans reset ni init. Si l'image s'affiche, la chaîne
+vidéo est bonne et seule l'init du panel est en cause.
+
 Pistes suivantes si 0x9c n'apparaît pas :
 - comparer la séquence d'init du panel avec le downstream (mode LP, délais,
   ordre reset/alims) ;

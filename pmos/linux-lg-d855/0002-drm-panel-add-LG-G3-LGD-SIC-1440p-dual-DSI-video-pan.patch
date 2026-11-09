@@ -44,10 +44,10 @@ index f35ada096..fa49857cc 100644
 +obj-$(CONFIG_DRM_PANEL_LGE_G3_LGD_SIC) += panel-lge-g3-lgd-sic.o
 diff --git a/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
 new file mode 100644
-index 000000000..9ab2d7a9c
+index 000000000..3c155dbe9
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,390 @@
+@@ -0,0 +1,406 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -92,6 +92,15 @@ index 000000000..9ab2d7a9c
 +{
 +	return container_of(panel, struct lgd_sic, panel);
 +}
++
++/*
++ * Bring-up aid: keep the panel as the bootloader left it (powered, out of
++ * reset, initialized) on the first prepare, without resetting it or sending
++ * the init sequence. Tells a video-path problem from a panel-init problem.
++ */
++static bool keep_init;
++module_param(keep_init, bool, 0644);
++MODULE_PARM_DESC(keep_init, "keep the bootloader panel state on first prepare");
 +
 +static void lgd_sic_reset(struct lgd_sic *ctx)
 +{
@@ -259,6 +268,13 @@ index 000000000..9ab2d7a9c
 +	if (ret < 0)
 +		goto err_vsp;
 +	usleep_range(5000, 6000);
++
++	if (keep_init) {
++		keep_init = false;
++		dev_info(dev, "keeping the bootloader panel state\n");
++		lgd_sic_dump_power_mode(ctx);
++		return 0;
++	}
 +
 +	lgd_sic_reset(ctx);
 +
