@@ -64,3 +64,7 @@ CONFIG_DRM_SIMPLEDRM=y
 CONFIG_MSM_MMCC_8974=y
 # GCC n'était built-in que par le select de MMCC : indispensable au boot
 CONFIG_MSM_GCC_8974=y
+# DVFS du GPU Adreno 330 : sans devfreq, msm_devfreq_init échoue et le GPU
+# reste à la fréquence choisie par défaut (table OPP 27/200/320 MHz du dtsi)
+CONFIG_PM_DEVFREQ=y
+CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y

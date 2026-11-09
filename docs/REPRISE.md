@@ -189,3 +189,15 @@ Rétroéclairage encore faible : vérifier brightness et le registre 0x16.
 
 r36 : rétroéclairage en mappage linéaire (`ti,linear-mapping-mode` sur le
 nœud LED, registre 0x16 = 0x01, ajouté au patch 0008), niveau 1600 conservé.
+
+r37 : `CONFIG_PM_DEVFREQ` + `DEVFREQ_GOV_SIMPLE_ONDEMAND` (fragment, config
+régénérée par make-config.sh). Sans lui : « Couldn't initialize GPU
+devfreq », pas de DVFS du GPU (table OPP 27/200/320 MHz du dtsi), et
+gfx3d_clk_src (horloge RPM) reste sans vote de fréquence.
+Avertissement connu, inoffensif pour l'instant : « byte0_clk_src: rcg didn't
+update its configuration » au premier modeset (set_rate du RCG byte/pclk
+avant que la PLL DSI ne tourne ; la config se fait au démarrage de la PLL).
+Piste pour plus tard : CLK_OPS_PARENT_ENABLE sur les RCG byte/pclk de
+mmcc-msm8974.
+Compilation vérifiée hors pmbootstrap : panel-lge-g3-lgd-sic.o et
+leds-lm3697.o sans avertissement.
