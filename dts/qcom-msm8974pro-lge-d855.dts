@@ -77,6 +77,8 @@
 			height = <2560>;
 			stride = <(1440 * 3)>;
 			format = "r8g8b8";
+			/* taille physique (width-mm/height-mm) : phoc en déduit l'échelle */
+			panel = <&panel>;
 		};
 	};
 
@@ -307,6 +309,9 @@
 
 	panel: panel@0 {
 		compatible = "lge,g3-panel-lgd-sic";
+		/* 5,5" 16:9 */
+		width-mm = <68>;
+		height-mm = <121>;
 		reg = <0>;
 
 		vdd-supply = <&pm8941_l10>;
