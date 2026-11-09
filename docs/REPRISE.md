@@ -165,3 +165,15 @@ GPIO 100 ; LM3697 enable GPIO 91 ; I2C commun GPIO 83/84 = blsp2_i2c5.
 pkgrel 33 : default-brightness-level 1600 (choisi à l'œil, mappage
 exponentiel). Phosh lancé à la main par greetd sur l'affichage natif avec
 keep_init : fonctionne, fluidité encore perfectible.
+
+Sans keep_init (pkgrel 32/33) : toujours noir, alors que le GDSC tient. Le
+coupable est bien notre séquence de mise sous tension/init du panneau.
+pkgrel 34 : paramètre `init_steps` du pilote panel pour la bissecter sans
+recompiler (masque : 1 cycle DSV, 2 reset, 4 table LG, 8 sleep out +
+display on, 16 commandes en HS ; défaut 15). `keep_init=1` = étapes 0 au
+premier prepare. device-lg-d855 r16 : `keep_init=1` dans modprobe.d (écran
+utilisable en attendant) ; tests au démarrage avec
+`panel_lge_g3_lgd_sic.keep_init=0 panel_lge_g3_lgd_sic.init_steps=N` sur la
+ligne de commande. Ordre proposé : 8 (sleep out/display on seuls), 12
+(table + on, sans reset), 14 (reset + table + on, sans cycle DSV), 15, puis
++16 (HS) sur celui qui échoue.
