@@ -42,7 +42,7 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 | Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
 | Panel | LGD SIC 1440p, vidéo, **double DSI** | décrit, désactivé | driver écrit (patch 0002) ; **MDP5 ne gère pas le DSI couplé** |
-| GPU | Adreno 330 | désactivé (attend le panel) | oui (freedreno) |
+| GPU | Adreno 330 | **testé** ✓ en rendu seul (FD330, GLES 3.0) ; pas encore d'affichage natif | oui (freedreno, `msm.headless_gpu`) |
 | Bluetooth | WCNSS (même puce que le WiFi) | activé | oui (`btqcomsmd`, firmware requis) |
 | Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
 | Audio, capteurs, caméra, NFC | | absents | |
