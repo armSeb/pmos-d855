@@ -40,4 +40,8 @@ deviceinfo_flash_offset_ramdisk="0x02000000"
 deviceinfo_flash_offset_second="0x00f00000"
 deviceinfo_flash_offset_tags="0x01e00000"
 deviceinfo_flash_pagesize="2048"
+# La partition boot fait 16 MiB, dont 512 KiB pour lk2nd : le boot.img doit
+# tenir dans 15,5 MiB (lk2nd-flash-boot). En gzip, il fait 16,2 MiB.
+# lzma est le plus dense (noyau : CONFIG_RD_LZMA=y).
+deviceinfo_initfs_compression="lzma"
 deviceinfo_flash_sparse="true"
