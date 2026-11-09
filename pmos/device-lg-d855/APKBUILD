@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=21
+pkgrel=22
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
@@ -42,6 +42,7 @@ source="
 	adreno-a330-quirks.sh
 	adreno-a330-quirks.conf
 	extract-firmware-lg-d855.service
+	resolved-lg-d855.conf
 	"
 
 build() {
@@ -56,6 +57,9 @@ package() {
 	install -Dm755 devmem32 "$pkgdir"/usr/bin/devmem32
 	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
 	install -Dm755 "$srcdir"/extract-firmware.sh "$pkgdir"/usr/bin/extract-firmware
+	# DNSSEC désactivé : horloge en 1970 au démarrage (voir le fichier)
+	install -Dm644 "$srcdir"/resolved-lg-d855.conf \
+		"$pkgdir"/usr/lib/systemd/resolved.conf.d/50-lg-d855.conf
 	# Copie des firmwares au premier démarrage (activé d'office)
 	install -Dm644 "$srcdir"/extract-firmware-lg-d855.service \
 		"$pkgdir"/usr/lib/systemd/system/extract-firmware-lg-d855.service
