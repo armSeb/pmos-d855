@@ -241,3 +241,6 @@ SET_DISPLAY_OFF -110 (commande refusée, vidéo encore active) ; le reset
 est mis quand même. Au rallumage (r38), seulement 5 ms entre la levée du
 reset et la première commande, contre ~15 ms au démarrage (5 ms + VSN +
 10 ms). r39 : 10 ms de reset tenu puis 20 ms après sa levée.
+r40 : plus de display off / sleep in à l'extinction par défaut (paramètre
+`send_off=1` pour les remettre) : la commande expirait (-110) et laissait
+une transmission DMA avortée sur l'hôte DSI ; le reset éteint le panneau.
