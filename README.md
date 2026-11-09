@@ -223,6 +223,24 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 6. Modem (MSS + rmtfs + ModemManager), puis audio.
 7. Upstream du DTS dans le fork msm8974-mainline puis dans Linux (ajouter son `Signed-off-by` avant l'envoi).
 
+## Affichage : câblage confirmé par le manuel de service
+
+Manuel de service LG D855 (V1.0, juillet 2014, schémas pages 216, 224 et
+235 ; document LG à usage interne, non inclus dans le dépôt) :
+
+| Signal | Câblage | DTS |
+|---|---|---|
+| MIPI0 / MIPI1 | deux liens DSI 4 voies vers le panneau 5,5" QHD | `mdss_dsi0` + `mdss_dsi1` couplés |
+| `LCD_RESET_N` | PM8941 GPIO 19 | `panel_reset_pin` |
+| IOVCC panneau | `+1V8_VREG_L12` (modif « REVB_0206 » ; L10 sur le schéma bloc, plus ancien) | `pm8941_l12` |
+| VSP/VSN ±5,5 V | TPS65132 (`DSV_ENP` GPIO 56, `DSV_ENN` GPIO 100), I2C commun | `tps65132@3e` |
+| Rétroéclairage | LM3697 (`LCD_BL_EN` GPIO 91, `LCD_PWM` depuis le panneau), I2C commun | `lm3697@36` |
+| I2C commun | GPIO 83/84 (BLSP11) | `blsp2_i2c5` |
+| TE / VSYNC | GPIO 12 (inutile en mode vidéo) | — |
+
+Le schéma bloc (page 216) montre un LM3631 (rétroéclairage + VSP/VSN) : c'est
+une révision antérieure, le schéma détaillé « RevB » utilise LM3697 + TPS65132.
+
 ## Remarque sur les révisions matérielles
 
 Le downstream gère des révisions de carte (`evb1` à `rev_12`). Le DTS vise
