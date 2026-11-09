@@ -46,6 +46,13 @@ pkgrel 25 : paramètre `keep_init` du pilote panel
 bootloader l'a laissé, sans reset ni init. Si l'image s'affiche, la chaîne
 vidéo est bonne et seule l'init du panel est en cause.
 
+keep_init testé : écran toujours noir, power mode 0x00. Les registres DSI
+(contrôleur, PHY, PLL), horloges et MDP natifs sont identiques à ceux du
+bootloader (snapshots comparés) à part LN_CFG_4/TIMING_CTRL_5-6 déjà testés.
+Piste : le DT LG alimente le panneau par `vdd-supply = <&pm8941_l10>` (1,8 V,
+seul consommateur de L10) en plus de L12 ; notre DTS n'en faisait rien.
+pkgrel 26 : L10 fixé à 1,8 V et toujours allumé.
+
 Pistes suivantes si 0x9c n'apparaît pas :
 - comparer la séquence d'init du panel avec le downstream (mode LP, délais,
   ordre reset/alims) ;

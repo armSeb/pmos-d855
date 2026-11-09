@@ -609,9 +609,17 @@
 			regulator-max-microvolt = <2950000>;
 		};
 
+		/*
+		 * Alimentation « vdd » 1,8 V du panneau dans le DT LG
+		 * (msm8974pro-lge-panel.dtsi : vdd-supply = <&pm8941_l10> sur
+		 * mdss_dsi0/1), seul consommateur de L10 côté LG. Gardée allumée
+		 * à 1,8 V comme le bootloader la laisse.
+		 */
 		pm8941_l10: l10 {
 			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <2950000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+			regulator-boot-on;
 		};
 
 		pm8941_l11: l11 {
