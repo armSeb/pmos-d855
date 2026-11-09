@@ -147,7 +147,11 @@
 	backlight: backlight {
 		compatible = "led-backlight";
 		leds = <&lcd_led>;
-		default-brightness-level = <177>;
+		/*
+		 * Échelle 0-2047 (LM3697 11 bits, mappage exponentiel par défaut) :
+		 * 1600 donne à peu près la luminosité du bootloader.
+		 */
+		default-brightness-level = <1600>;
 		status = "okay";
 	};
 

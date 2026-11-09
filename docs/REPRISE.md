@@ -161,3 +161,7 @@ GPIO 100 ; LM3697 enable GPIO 91 ; I2C commun GPIO 83/84 = blsp2_i2c5.
 - Plus tard : remettre Phosh avec le GPU, retirer la relecture de debug,
   proposer en amont les correctifs (adresse et IRQ DSI1, mmcc, OVP LM3697,
   carte SD lk2nd), périphériques du fork archeYR/lg-d855-mainline.
+
+pkgrel 33 : default-brightness-level 1600 (choisi à l'œil, mappage
+exponentiel). Phosh lancé à la main par greetd sur l'affichage natif avec
+keep_init : fonctionne, fluidité encore perfectible.
