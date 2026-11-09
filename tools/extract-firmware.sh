@@ -32,18 +32,20 @@ if p=$(part modem); then
 	umount "$MNT/modem"
 fi
 
-# 2. Partition system : microcode GPU
-if p=$(part system); then
-	mkdir -p "$MNT/system"
-	mount -o ro "$p" "$MNT/system"
-	S="$MNT/system"
-	# Microcode Adreno 330 (si absent de linux-firmware)
-	for f in a330_pm4.fw a330_pfp.fw; do
-		for src in "$S"/etc/firmware/$f "$S"/vendor/firmware/$f; do
-			[ -e "$src" ] && cp -v "$src" "$DEST/qcom/" && break
-		done
-	done
-	umount "$MNT/system"
+# 2. Microcode du GPU Adreno 330 (a330_pm4.fw, a330_pfp.fw), si absent de
+#    linux-firmware : cherché dans system (system-as-root : system/system/…).
+mkdir -p "$DEST/qcom"
+if [ ! -e "$DEST/qcom/a330_pm4.fw" ] || [ ! -e "$DEST/qcom/a330_pfp.fw" ]; then
+	if p=$(part system); then
+		mkdir -p "$MNT/system"
+		if mount -o ro "$p" "$MNT/system"; then
+			for f in a330_pm4.fw a330_pfp.fw; do
+				src=$(find "$MNT/system" -name "$f" -type f 2>/dev/null | head -n1)
+				[ -n "$src" ] && cp -v "$src" "$DEST/qcom/$f"
+			done
+			umount "$MNT/system"
+		fi
+	fi
 fi
 
 # 3. Calibration WiFi de la puce iris (WCNSS_qcom_wlan_nv.bin, lue par
@@ -68,3 +70,6 @@ echo "Copié dans $DEST. Les fichiers .bXX doivent rester à côté de leur .mdt
 [ -e "$D/wcnss.mdt" ] && [ -e "$D/WCNSS_qcom_wlan_nv.bin" ] \
 	&& echo "WiFi/BT : OK, redémarrer pour charger la calibration" \
 	|| echo "WiFi/BT : wcnss.mdt ou $nv introuvable (ls /dev/disk/by-partlabel pour voir les partitions)"
+[ -e "$DEST/qcom/a330_pm4.fw" ] && [ -e "$DEST/qcom/a330_pfp.fw" ] \
+	&& echo "GPU : microcode a330 OK" \
+	|| echo "GPU : a330_pm4.fw / a330_pfp.fw introuvables (paquet linux-firmware-qcom ?)"

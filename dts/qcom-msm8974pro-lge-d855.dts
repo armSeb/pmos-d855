@@ -282,6 +282,20 @@
  * support existera ; en attendant, l'affichage passe par le framebuffer
  * laissé par le bootloader (voir chosen/framebuffer).
  */
+/*
+ * GPU Adreno 330, en mode « headless » (patch 0005, msm.headless_gpu=1) :
+ * périphérique DRM de rendu seul, l'affichage restant sur simple-framebuffer.
+ * - pas d'IOMMU GPU décrite pour la MSM8974 : msm.allow_vram_carveout=1 ;
+ * - interconnects retirés : le chemin gfx-mem passe par mmssnoc, désactivé
+ *   (son premier vote casse l'affichage hérité), et ocmem est optionnel.
+ */
+&gpu {
+	/delete-property/ interconnects;
+	/delete-property/ interconnect-names;
+
+	status = "okay";
+};
+
 &mdss {
 	status = "disabled";
 };

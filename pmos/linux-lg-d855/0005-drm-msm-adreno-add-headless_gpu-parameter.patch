@@ -1,0 +1,38 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/msm/adreno: add headless_gpu parameter
+
+On some boards the display is not driven by msm: e.g. the LG G3 (D855)
+uses a bonded dual-DSI panel that MDP5 on MSM8974 cannot drive yet, so
+the bootloader's framebuffer is used through simple-framebuffer. Its
+MDSS node is disabled, so no msm KMS master ever binds the Adreno
+component and the GPU is never brought up.
+
+The driver already has a headless path (a dummy "msm" master with no
+KMS) for amd,imageon. Allow opting into it with msm.headless_gpu=1 to
+get a render-only DRM device for the GPU.
+
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_device.c b/drivers/gpu/drm/msm/adreno/adreno_device.c
+index 16e7ac444..065d8b18d 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -28,6 +28,10 @@ bool disable_acd;
+ MODULE_PARM_DESC(disable_acd, "Forcefully disable GPU ACD");
+ module_param_unsafe(disable_acd, bool, 0400);
+ 
++static bool headless_gpu;
++MODULE_PARM_DESC(headless_gpu, "Register the GPU as a standalone (render-only) DRM device, for boards whose display is not driven by msm (e.g. simple-framebuffer)");
++module_param(headless_gpu, bool, 0400);
++
+ extern const struct adreno_gpulist a2xx_gpulist;
+ extern const struct adreno_gpulist a3xx_gpulist;
+ extern const struct adreno_gpulist a4xx_gpulist;
+@@ -291,7 +295,8 @@ static int adreno_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (of_device_is_compatible(pdev->dev.of_node, "amd,imageon"))
++	if (of_device_is_compatible(pdev->dev.of_node, "amd,imageon") ||
++	    headless_gpu)
+ 		adreno_device_register_headless();
+ 
+ 	return 0;

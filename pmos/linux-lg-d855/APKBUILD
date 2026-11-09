@@ -4,7 +4,7 @@
 # Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
 pkgname=linux-lg-d855
 pkgver=6.16.12
-pkgrel=15
+pkgrel=16
 pkgdesc="LG G3 (D855) mainline kernel"
 arch="armv7"
 _carch="arm"
@@ -44,6 +44,7 @@ source="
 	0002-drm-panel-add-LG-G3-LGD-SIC-1440p-dual-DSI-video-pan.patch
 	0003-drm-sysfb-simpledrm-hold-interconnect-bandwidth.patch
 	0004-clk-qcom-mmcc-msm8974-don-t-park-mdp_clk_src-at-registration.patch
+	0005-drm-msm-adreno-add-headless_gpu-parameter.patch
 	"
 builddir="$srcdir/linux-$_commit"
 

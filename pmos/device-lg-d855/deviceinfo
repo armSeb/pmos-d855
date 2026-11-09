@@ -23,11 +23,9 @@ deviceinfo_getty="ttyMSM0;115200"
 # Linux coupe les horloges et régulateurs « inutilisés », le MDSS arrête de
 # rafraîchir le panel alors que ses alimentations (DSV, GPIO 56/100) restent
 # allumées → écran rose et rémanence. À retirer quand le panel sera géré.
-# Le driver d'horloges multimédia (mmcc-msm8974) casse l'affichage hérité du
-# bootloader dans la première seconde (écran bleu). Il est désormais compilé en
-# module et bloqué au démarrage par /etc/modprobe.d/lg-d855.conf (paquet
-# device), ce qui remplace initcall_blacklist=mmcc_msm8974_driver_init et
-# permet de le charger à la main (mmcc-trace) pour trouver la cause.
+# mmcc-msm8974 (horloges multimédia) garait mdp_clk_src sur XO à son probe et
+# cassait l'affichage hérité (écran bleu) : corrigé par le patch noyau 0004
+# (trouvé avec mmcc-trace), il se charge de nouveau normalement.
 deviceinfo_kernel_cmdline="clk_ignore_unused pd_ignore_unused regulator_ignore_unused"
 
 # Bootloader related

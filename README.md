@@ -204,8 +204,9 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
 2. Affichage via le framebuffer laissé par le bootloader (simple-framebuffer +
    simpledrm) : 1440x2560 RGB888 à `0x03200000`, stride 4320 (relevé avec
-   `mdp-dump`). Deux pièges trouvés : `mmcc-msm8974` reprogrammait MMPLL1/3
-   à chaud et cassait l'affichage dans la première seconde (patch 0004), et
+   `mdp-dump`). Deux pièges trouvés : `mmcc-msm8974` garait l'horloge du MDP
+   (`mdp_clk_src`) sur XO à son probe et cassait l'affichage dans la première
+   seconde (trouvé par trace regmap avec `mmcc-trace`, patch 0004), et
    le bus multimédia (MMSS NoC) doit rester tel que le bootloader l'a réglé
    (driver désactivé, vote BIMC par simpledrm, patch 0003). ← **on en est là**
 3. Affichage natif. Le driver du panel est écrit
@@ -215,7 +216,9 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
    MSM8974 ne sait pas piloter deux interfaces DSI couplées (seul le côté
    DSI le gère, et DPU ne prend pas en charge la MSM8974). Il faudra
    ajouter ce support à MDP5 avant de pouvoir l'activer.
-4. GPU, Phosh.
+4. GPU : Adreno 330 en rendu seul (patch 0005, `msm.headless_gpu=1`,
+   sans IOMMU : `allow_vram_carveout`), puis affichage natif pour l'accélération
+   réelle. Phosh fonctionne déjà en rendu logiciel.
 5. WiFi, batterie, Bluetooth.
 6. Modem (MSS + rmtfs + ModemManager), puis audio.
 7. Upstream du DTS dans le fork msm8974-mainline puis dans Linux (ajouter son `Signed-off-by` avant l'envoi).
