@@ -91,6 +91,22 @@ donc ni msm ni le GDSC. Événements dans cette fenêtre : passage VSP/VSN de
 5,0 à 5,5 V (25,19 / 25,51 s) et sonde du LM3697 (25,67-25,85 s, reset
 logiciel du rétroéclairage). À départager par `module_blacklist=`.
 
+Résultats `module_blacklist=` (avec les *_ignore_unused) :
+- sans tps65132 : le LM3697 éteint le rétroéclairage à sa sonde (attendu) ;
+- sans lm3697 : rétroéclairage gardé, l'image part en fantôme ;
+- sans lm3697 ni tps65132 (msm chargé) : l'image disparaît ;
+- sans lm3697 ni msm (TPS65132 à 5,5 V) : console intacte.
+Coupable : la sonde de msm (MDSS/MDP/DSI). Le runtime PM coupe le GDSC MDSS
+et les horloges du cœur ; `pd_ignore_unused` ne l'empêche pas. Le passage
+de VSP/VSN à 5,5 V est inoffensif.
+
+pkgrel 32 : simpledrm tient `power-domains = <&mmcc MDSS_GDSC>` et les
+horloges AHB/AXI/MDP/LUT/VSYNC/ESC0/ESC1 (nœud framebuffer du DTS), mmcc
+passé en =y. Attendu : la console survit au chargement de msm. Test ensuite
+avec `keep_init=1` : si l'image reste après le bind de msm, la chaîne vidéo
+msm est bonne ; sinon, regarder le trou entre le retrait de simpledrm
+(aperture) et le premier modeset.
+
 Rappel : avec `keep_init` (aucun reset, aucune init), l'écran devenait noir
 aussi. Le panneau perd donc son état, ou cesse d'afficher, au moment où msm
 prend la main, indépendamment de notre séquence d'init.

@@ -73,6 +73,24 @@
 			 * pour qu'il garde les réglages du bootloader.
 			 */
 			interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>;
+			/*
+			 * Le chargement de msm (sonde MDSS/MDP/DSI, runtime PM)
+			 * coupe le GDSC MDSS et les horloges du MDP bien avant le
+			 * premier modeset : le flux vidéo s'arrête et l'image part
+			 * en fantôme (test « module_blacklist », pkgrel 31), même
+			 * avec pd_ignore_unused. simpledrm garde donc le domaine
+			 * et les horloges du cœur MDSS jusqu'à ce que msm le
+			 * remplace. mmcc doit être intégré au noyau (=y), sinon
+			 * simpledrm attend le module.
+			 */
+			power-domains = <&mmcc MDSS_GDSC>;
+			clocks = <&mmcc MDSS_AHB_CLK>,
+				 <&mmcc MDSS_AXI_CLK>,
+				 <&mmcc MDSS_MDP_CLK>,
+				 <&mmcc MDSS_MDP_LUT_CLK>,
+				 <&mmcc MDSS_VSYNC_CLK>,
+				 <&mmcc MDSS_ESC0_CLK>,
+				 <&mmcc MDSS_ESC1_CLK>;
 			width = <1440>;
 			height = <2560>;
 			stride = <(1440 * 3)>;
