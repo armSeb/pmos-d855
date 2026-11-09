@@ -1,0 +1,29 @@
+From f9ad5af873367773c2b23024184ee44d82600848 Mon Sep 17 00:00:00 2001
+From: armSeb <armSeb@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 12:41:57 +0100
+Subject: [PATCH] lk2nd: msm8974: lge-d855: Enable SD card
+
+The LG G3 (D855) has its microSD slot on SDHC2. Enabling it lets lk2nd
+find extlinux.conf on the SD card, e.g. for postmarketOS installed on
+the SD card.
+---
+ lk2nd/device/dts/msm8974/msm8974-lge-d855.dts | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/lk2nd/device/dts/msm8974/msm8974-lge-d855.dts b/lk2nd/device/dts/msm8974/msm8974-lge-d855.dts
+index ff5a490..5fd2b20 100644
+--- a/lk2nd/device/dts/msm8974/msm8974-lge-d855.dts
++++ b/lk2nd/device/dts/msm8974/msm8974-lge-d855.dts
+@@ -14,6 +14,9 @@
+ 
+ 	//FIXME: lk2nd,dtb-files = "msm8974-lge-d855";
+ 
++	/* microSD slot */
++	lk2nd,sd-mmc = <&sdhc2>;
++
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 		down {
+-- 
+2.43.0
+
