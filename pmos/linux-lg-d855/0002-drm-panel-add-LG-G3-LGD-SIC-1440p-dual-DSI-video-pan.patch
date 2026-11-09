@@ -44,10 +44,10 @@ index f35ada096..fa49857cc 100644
 +obj-$(CONFIG_DRM_PANEL_LGE_G3_LGD_SIC) += panel-lge-g3-lgd-sic.o
 diff --git a/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
 new file mode 100644
-index 000000000..69084f8fb
+index 000000000..9e53a789f
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,369 @@
+@@ -0,0 +1,374 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -376,9 +376,14 @@ index 000000000..69084f8fb
 +	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
 +		ctx->dsi[i]->lanes = 4;
 +		ctx->dsi[i]->format = MIPI_DSI_FMT_RGB888;
-+		/* non_burst_sync_event, init commands in LP mode */
++		/*
++		 * non_burst_sync_event, init commands in LP mode. The clock
++		 * lane must stay in HS (continuous clock): the vendor DT sets
++		 * qcom,mdss-dsi-lane-hs = <1>, and the bootloader sets
++		 * DSI_LANE_CTRL.CLKLN_HS_FORCE_REQUEST. With a non-continuous
++		 * clock, video is sent but the panel stays black.
++		 */
 +		ctx->dsi[i]->mode_flags = MIPI_DSI_MODE_VIDEO |
-+					  MIPI_DSI_CLOCK_NON_CONTINUOUS |
 +					  MIPI_DSI_MODE_LPM;
 +
 +		ret = devm_mipi_dsi_attach(dev, ctx->dsi[i]);
@@ -417,6 +422,3 @@ index 000000000..69084f8fb
 +
 +MODULE_DESCRIPTION("DRM driver for the LG G3 LGD SIC 1440p dual DSI video panel");
 +MODULE_LICENSE("GPL");
--- 
-2.43.0
-
