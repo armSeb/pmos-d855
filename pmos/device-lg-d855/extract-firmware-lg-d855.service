@@ -1,0 +1,17 @@
+# Premier démarrage : copie les firmwares depuis les partitions Android de
+# l'eMMC (lecture seule), puis relance le remoteproc WCNSS (WiFi/BT), qui a
+# échoué faute de firmware. Ne fait plus rien une fois wcnss.mdt présent.
+[Unit]
+Description=Copy LG G3 firmware from the Android partitions
+ConditionPathExists=!/lib/firmware/qcom/msm8974/lge/d855/wcnss.mdt
+After=local-fs.target systemd-udev-trigger.service
+Before=NetworkManager.service bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/extract-firmware
+# ($$ : échappement du $ pour systemd)
+ExecStartPost=-/bin/sh -c 'for r in /sys/class/remoteproc/remoteproc*; do [ "$$(cat "$$r/state")" = offline ] && echo start > "$$r/state"; done; true'
+
+[Install]
+WantedBy=multi-user.target

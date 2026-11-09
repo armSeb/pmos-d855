@@ -4,6 +4,8 @@
 # firmwares utiles vers /lib/firmware. Rien n'est écrit sur l'eMMC.
 #
 # Usage : sudo sh extract-firmware.sh [destination]
+# Lancé automatiquement au premier démarrage par extract-firmware-lg-d855.service
+# (paquet device-lg-d855), tant que wcnss.mdt est absent.
 set -eu
 
 DEST=${1:-/lib/firmware}
@@ -15,6 +17,13 @@ part() {
 	# ls /dev/disk/by-partlabel)
 	[ -e "$BYNAME/$1" ] && echo "$BYNAME/$1" || { echo "partition $1 introuvable" >&2; return 1; }
 }
+
+# Au premier démarrage (service extract-firmware-lg-d855), udev peut ne pas
+# avoir encore créé les liens by-partlabel : on les attend un peu.
+i=0
+while [ ! -e "$BYNAME/modem" ] && [ $i -lt 20 ]; do
+	sleep 0.5; i=$((i + 1))
+done
 
 D="$DEST/qcom/msm8974/lge/d855"
 mkdir -p "$D"

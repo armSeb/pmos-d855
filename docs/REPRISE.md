@@ -228,3 +228,6 @@ sur l'ancienne carte : device-lg-d855 r20 en dépend.
 USB : le gadget n'est vu par le PC que si le câble est branché au démarrage.
 Pas de détection VBUS côté ChipIdea (pas d'extcon sur le nœud usb) : à
 câbler (extcon du chargeur bq24296 ou du PM8941).
+device-lg-d855 r21 : extract-firmware lancé au premier démarrage
+(extract-firmware-lg-d855.service, activé d'office, condition : wcnss.mdt
+absent), puis relance des remoteprocs restés « offline » (WCNSS).
