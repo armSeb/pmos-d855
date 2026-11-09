@@ -404,6 +404,13 @@
 	qcom,dual-dsi-mode;
 	qcom,sync-dual-dsi;
 
+	/*
+	 * Interruption MDSS de DSI1 : bit 5 (MDSS_INTR_DSI1 en downstream).
+	 * qcom-msm8974.dtsi met <4> aux deux contrôleurs : « Flags mismatch
+	 * irq … dsi_isr » et DSI1 ne démarre pas. À corriger en amont.
+	 */
+	interrupts = <5>;
+
 	/* En mode couplé, la PLL de DSI0 cadence les deux liens */
 	assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
 				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
