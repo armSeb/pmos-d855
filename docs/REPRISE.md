@@ -77,9 +77,19 @@ déclare la charge LG de 100 mA (HPM).
 TPS65132 relu en mode msm (`i2cget -f -y 2 0x3e`, avant pkgrel 31) :
 0x00 = 0x0f (VPOS 4,0 + 15 × 0,1 = 5,5 V), 0x01 = 0x0f (VNEG −5,5 V),
 0x03 = 0x43 (décharges actives VPOS/VNEG + bit 6 APPS = 1). Le pilote mainline
-n'écrit jamais APPS et le cycle d'alimentation de pkgrel 30 recharge les
-registres depuis l'EEPROM : 0x43 est la valeur programmée par LG. Tensions et
-mode conformes : l'alimentation VSP/VSN est écartée comme cause.
+n'écrit jamais APPS : 0x43 vient de LG (EEPROM ou bootloader).
+ATTENTION : 0x0f est la valeur écrite par Linux, pas celle du bootloader. Au
+démarrage, `lcd-vpos/lcd-vneg: Bringing 5000000uV into 5500000-5500000uV` :
+le bootloader laisse ±5,0 V (0x0a) et le cœur regulator force ±5,5 V dès la
+sonde du TPS65132 (~25,2 s), sans aucun consommateur.
+
+pkgrel 31 (L10 en HPM, opmode « normal » confirmé) : toujours noir.
+Test `clk_ignore_unused pd_ignore_unused regulator_ignore_unused` +
+`keep_init=1` : l'écran devient noir vers 25-26 s, AVANT le bind de msm
+(26,5 s) et avant `keeping the bootloader panel state` (29,6 s). Ce n'est
+donc ni msm ni le GDSC. Événements dans cette fenêtre : passage VSP/VSN de
+5,0 à 5,5 V (25,19 / 25,51 s) et sonde du LM3697 (25,67-25,85 s, reset
+logiciel du rétroéclairage). À départager par `module_blacklist=`.
 
 Rappel : avec `keep_init` (aucun reset, aucune init), l'écran devenait noir
 aussi. Le panneau perd donc son état, ou cesse d'afficher, au moment où msm
