@@ -20,11 +20,14 @@ pour l'état général ; ce fichier décrit le chantier en cours.
 console, quelques traits verticaux colorés à gauche. Le panel n'est pas
 initialisé : power mode relu à 0x00 (attendu 0x9c), DSI0 renvoie -61.
 
-Hypothèse testée par le patch 0009 (pkgrel 23, pas encore essayé sur le
-téléphone) : le bootloader et le pilote downstream écrivent
+Hypothèse testée par le patch 0009 (pkgrel 24) : le bootloader et le pilote downstream écrivent
 `CMD_DMA_CTRL = 0x94000000` (BROADCAST_EN) sur les deux contrôleurs
 (`qcom,mdss-dsi-panel-broadcast-mode = <1>` dans le DT LG) ; mainline ne le
-fait pas. La relecture de debug passe maintenant par DSI1 seul.
+fait pas. La relecture de debug passe par DSI1 seul.
+Premier essai (pkgrel 23) : écritures sans erreur, mais la lecture expirait
+(« Set max pkt size failed, -110 ») car DSI0 n'était pas préparé pour les
+lectures alors que le déclenchement part sur les deux hôtes ; corrigé en
+pkgrel 24.
 
 Test :
 ```
