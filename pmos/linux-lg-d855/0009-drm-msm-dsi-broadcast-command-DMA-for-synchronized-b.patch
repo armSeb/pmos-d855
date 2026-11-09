@@ -1,0 +1,90 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: broadcast command DMA for synchronized bonded DSI
+
+With qcom,sync-dual-dsi, the DSI manager programs the command DMA of
+both hosts and triggers DSI_0 then DSI_1, but without the BROADCAST_EN
+bit of CMD_DMA_CTRL. The downstream driver (and the LG bootloader, on
+the LG G3 whose dual-DSI LGD panel needs it: CMD_DMA_CTRL=0x94000000 on
+both controllers) sets BROADCAST_EN on both hosts so the hardware sends
+the commands on both links in sync. Without it the G3 panel does not
+get initialized (power mode 0x00 after the init sequence) and stays
+blank.
+
+Set BROADCAST_EN on both hosts of a synchronized bonded pair.
+
+diff --git a/drivers/gpu/drm/msm/dsi/dsi.h b/drivers/gpu/drm/msm/dsi/dsi.h
+index 87496db20..fd5e30661 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi.h
++++ b/drivers/gpu/drm/msm/dsi/dsi.h
+@@ -88,6 +88,7 @@ void msm_dsi_host_set_phy_mode(struct mipi_dsi_host *host,
+ int msm_dsi_host_set_src_pll(struct mipi_dsi_host *host,
+ 			struct msm_dsi_phy *src_phy);
+ void msm_dsi_host_reset_phy(struct mipi_dsi_host *host);
++void msm_dsi_host_set_cmd_broadcast(struct mipi_dsi_host *host, bool enable);
+ void msm_dsi_host_get_phy_clk_req(struct mipi_dsi_host *host,
+ 	struct msm_dsi_phy_clk_request *clk_req,
+ 	bool is_bonded_dsi);
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+index 4d75529c0..7d6734d37 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -107,6 +107,9 @@ struct msm_dsi_host {
+ 
+ 	int id;
+ 
++	/* synchronized bonded DSI: command DMA broadcast to both links */
++	bool cmd_broadcast;
++
+ 	void __iomem *ctrl_base;
+ 	phys_addr_t ctrl_size;
+ 	struct regulator_bulk_data *supplies;
+@@ -771,9 +774,10 @@ static void dsi_ctrl_enable(struct msm_dsi_host *msm_host,
+ 		}
+ 	}
+ 
+-	dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
+-			DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+-			DSI_CMD_DMA_CTRL_LOW_POWER);
++	data = DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER | DSI_CMD_DMA_CTRL_LOW_POWER;
++	if (msm_host->cmd_broadcast)
++		data |= DSI_CMD_DMA_CTRL_BROADCAST_EN;
++	dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL, data);
+ 
+ 	data = 0;
+ 	/* Always assume dedicated TE pin */
+@@ -2256,6 +2260,13 @@ void msm_dsi_host_set_phy_mode(struct mipi_dsi_host *host,
+ 	msm_host->cphy_mode = src_phy->cphy_mode;
+ }
+ 
++void msm_dsi_host_set_cmd_broadcast(struct mipi_dsi_host *host, bool enable)
++{
++	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
++
++	msm_host->cmd_broadcast = enable;
++}
++
+ void msm_dsi_host_reset_phy(struct mipi_dsi_host *host)
+ {
+ 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index ca400924d..ec64e2789 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -103,6 +103,17 @@ static int dsi_mgr_setup_components(int id)
+ 		msm_dsi_host_set_phy_mode(msm_dsi->host, msm_dsi->phy);
+ 		msm_dsi_host_set_phy_mode(other_dsi->host, other_dsi->phy);
+ 
++		/*
++		 * Synchronized bonded panels get the same commands on both
++		 * links: let the hardware broadcast the command DMA (both
++		 * hosts have BROADCAST_EN, the trigger of DSI_0 is held until
++		 * DSI_1 is triggered), as the downstream driver does.
++		 */
++		if (IS_SYNC_NEEDED()) {
++			msm_dsi_host_set_cmd_broadcast(msm_dsi->host, true);
++			msm_dsi_host_set_cmd_broadcast(other_dsi->host, true);
++		}
++
+ 		/* Register slave host first, so that slave DSI device
+ 		 * has a chance to probe, and do not block the master
+ 		 * DSI device's probe.

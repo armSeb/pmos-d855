@@ -44,10 +44,10 @@ index f35ada096..fa49857cc 100644
 +obj-$(CONFIG_DRM_PANEL_LGE_G3_LGD_SIC) += panel-lge-g3-lgd-sic.o
 diff --git a/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
 new file mode 100644
-index 000000000..fa1961fdd
+index 000000000..9ab2d7a9c
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,390 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -225,20 +225,17 @@ index 000000000..fa1961fdd
 +}
 +
 +/*
-+ * Bring-up aid: read back the DCS power mode on each link (expected 0x9c:
-+ * booster on, sleep out, normal mode, display on).
++ * Bring-up aid: read back the DCS power mode (expected 0x9c: booster on,
++ * sleep out, normal mode, display on). In synchronized bonded mode msm only
++ * triggers transfers from the second link, so read through it.
 + */
 +static void lgd_sic_dump_power_mode(struct lgd_sic *ctx)
 +{
-+	u8 mode;
-+	int i, ret;
++	u8 mode = 0;
++	int ret;
 +
-+	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+		mode = 0;
-+		ret = mipi_dsi_dcs_get_power_mode(ctx->dsi[i], &mode);
-+		dev_info(&ctx->dsi[i]->dev, "DSI%d power mode: 0x%02x (%d)\n",
-+			 i, mode, ret);
-+	}
++	ret = mipi_dsi_dcs_get_power_mode(ctx->dsi[1], &mode);
++	dev_info(&ctx->dsi[1]->dev, "power mode: 0x%02x (%d)\n", mode, ret);
 +}
 +
 +static int lgd_sic_prepare(struct drm_panel *panel)
