@@ -94,8 +94,11 @@ if [ "$method" = fastboot ]; then
 	command -v fastboot >/dev/null || die "fastboot introuvable"
 	step "Téléphone en fastboot"
 	fastboot devices | grep -q . || die "aucun appareil fastboot"
+	# Pas de « getvar all | grep -q » : grep -q ferme le tube à la première
+	# ligne, fastboot meurt en pleine réponse et lk2nd reste bloqué (la
+	# commande suivante attend sans fin). product suffit : lk2nd-msm8974.
 	product=$(fastboot getvar product 2>&1 | sed -n 's/^product: *//p')
-	if fastboot getvar all 2>&1 | grep -qi lk2nd; then
+	if echo "$product" | grep -qi lk2nd; then
 		part=lk2nd; who="lk2nd"
 	else
 		part=boot; who="bootloader LG"
@@ -118,7 +121,7 @@ if [ "$method" = fastboot ]; then
 	echo "  attente du fastboot de lk2nd (30 s max)…"
 	i=0
 	while [ $i -lt 30 ]; do
-		if fastboot getvar all 2>&1 | grep -qi lk2nd; then
+		if fastboot getvar product 2>&1 | grep -i lk2nd >/dev/null; then
 			echo "  OK : lk2nd répond"
 			exit 0
 		fi
