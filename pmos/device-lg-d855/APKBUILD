@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=13
+pkgrel=14
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
@@ -34,6 +34,7 @@ source="
 	lk2nd-flash-boot.service
 	lk2nd-flash-boot.path
 	mmcc-trace.sh
+	mdss-snapshot.sh
 	modprobe-lg-d855.conf
 	modules-load-lg-d855.conf
 	"
@@ -51,6 +52,7 @@ package() {
 	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
 	install -Dm755 "$srcdir"/extract-firmware.sh "$pkgdir"/usr/bin/extract-firmware
 	install -Dm755 "$srcdir"/mmcc-trace.sh "$pkgdir"/usr/bin/mmcc-trace
+	install -Dm755 "$srcdir"/mdss-snapshot.sh "$pkgdir"/usr/bin/mdss-snapshot
 	install -Dm644 "$srcdir"/modprobe-lg-d855.conf "$pkgdir"/etc/modprobe.d/lg-d855.conf
 	install -Dm644 "$srcdir"/modules-load-lg-d855.conf "$pkgdir"/etc/modules-load.d/lg-d855.conf
 
