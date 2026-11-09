@@ -1,0 +1,30 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: log raw invalid read responses (bring-up)
+
+Print the response header and ACK_ERR_STATUS when a read returns an
+unexpected packet, to debug the LG G3 dual-DSI panel.
+
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -2216,7 +2216,8 @@
+ 	cmd = buf[0];
+ 	switch (cmd) {
+ 	case MIPI_DSI_RX_ACKNOWLEDGE_AND_ERROR_REPORT:
+-		pr_err("%s: rx ACK_ERR_PACLAGE\n", __func__);
++		pr_err("%s: rx ACK_ERR_PACLAGE %4ph (DSI%d)\n", __func__, buf,
++		       msm_host->id);
+ 		ret = 0;
+ 		break;
+ 	case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_1BYTE:
+@@ -2232,7 +2233,9 @@
+ 		ret = dsi_long_read_resp(buf, msg);
+ 		break;
+ 	default:
+-		pr_warn("%s:Invalid response cmd\n", __func__);
++		pr_warn("%s: invalid response %4ph (DSI%d, ACK_ERR_STATUS %08x)\n",
++			__func__, buf, msm_host->id,
++			dsi_read(msm_host, REG_DSI_ACK_ERR_STATUS));
+ 		ret = 0;
+ 	}
+ 
