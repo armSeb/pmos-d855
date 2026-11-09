@@ -244,3 +244,17 @@ reset et la première commande, contre ~15 ms au démarrage (5 ms + VSN +
 r40 : plus de display off / sleep in à l'extinction par défaut (paramètre
 `send_off=1` pour les remettre) : la commande expirait (-110) et laissait
 une transmission DMA avortée sur l'hôte DSI ; le reset éteint le panneau.
+
+Rallumage : diff mdss-snapshot démarrage/rallumage → DSI (contrôleur, PLL,
+PHY) identique, compteurs de trames INTF1/INTF2 actifs ; seuls diffèrent des
+restes du bootloader (pipes RGB0/RGB1 sur 0x03200000, étages LM0/LM1,
+INTF0/3) que msm n'utilise pas. Le lien vidéo est donc le même : le panneau
+n'affiche pas.
+Test clé : init_steps=2 (reset seul) AU DÉMARRAGE → image normale. Le reset
+n'a pas d'effet visible ; tous les « succès » (8/12/14) peuvent n'être que
+l'init du bootloader conservée. Nos commandes DCS ne sont pas prouvées.
+PM8941 gpio19 vu dans /sys/kernel/debug/gpio : out, high, normal, vin-2
+(1,8 V), push-pull : configuration correcte.
+r41 : paramètres de test `reset_pulse` (écrire N : reset tenu N ms, à
+chaud) et `test_dcs` (commande DCS sans paramètre en fin de prepare, ex.
+0x21 = inversion des couleurs).

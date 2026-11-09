@@ -47,7 +47,7 @@ new file mode 100644
 index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,525 @@
+@@ -0,0 +1,584 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -131,6 +131,44 @@ index 000000000..769649da0
 +static bool send_off;
 +module_param(send_off, bool, 0644);
 +MODULE_PARM_DESC(send_off, "send display off/sleep in before reset on unprepare");
++
++/*
++ * Bring-up aids, to check that the reset line and the DCS commands really
++ * reach the panel:
++ * - test_dcs: DCS command without parameter sent at the end of every
++ *   prepare, e.g. 0x21 (enter invert mode, colours visibly inverted);
++ * - reset_pulse: writing N holds the reset asserted for N ms, at once,
++ *   while the panel is showing an image (a working reset blanks it).
++ */
++static unsigned int test_dcs;
++module_param(test_dcs, uint, 0644);
++MODULE_PARM_DESC(test_dcs, "DCS command (no parameter) sent at the end of prepare, 0 = none");
++
++static struct lgd_sic *lgd_sic_dev;
++
++static int lgd_sic_reset_pulse_set(const char *val, const struct kernel_param *kp)
++{
++	unsigned int ms;
++	int ret;
++
++	ret = kstrtouint(val, 0, &ms);
++	if (ret)
++		return ret;
++	if (!lgd_sic_dev || !ms || ms > 1000)
++		return -EINVAL;
++
++	dev_info(&lgd_sic_dev->dsi[0]->dev, "reset pulse: %u ms\n", ms);
++	gpiod_set_value_cansleep(lgd_sic_dev->reset_gpio, 1);
++	msleep(ms);
++	gpiod_set_value_cansleep(lgd_sic_dev->reset_gpio, 0);
++	return 0;
++}
++
++static const struct kernel_param_ops lgd_sic_reset_pulse_ops = {
++	.set = lgd_sic_reset_pulse_set,
++};
++module_param_cb(reset_pulse, &lgd_sic_reset_pulse_ops, NULL, 0200);
++MODULE_PARM_DESC(reset_pulse, "write N: assert the panel reset for N ms (test)");
 +module_param(init_steps, uint, 0644);
 +MODULE_PARM_DESC(init_steps,
 +		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands (default 14)");
@@ -299,6 +337,23 @@ index 000000000..769649da0
 +	}
 +}
 +
++static void lgd_sic_send_test_dcs(struct lgd_sic *ctx)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { };
++	u8 cmd = test_dcs;
++	int i;
++
++	if (!test_dcs || test_dcs > 0xff)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_write_buffer_multi(&dsi_ctx, &cmd, 1);
++	}
++	dev_info(&ctx->dsi[0]->dev, "test DCS %#04x sent: %d\n", cmd,
++		 dsi_ctx.accum_err);
++}
++
 +static int lgd_sic_prepare(struct drm_panel *panel)
 +{
 +	struct lgd_sic *ctx = to_lgd_sic(panel);
@@ -389,6 +444,7 @@ index 000000000..769649da0
 +	}
 +
 +	if (!(steps & (LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON))) {
++		lgd_sic_send_test_dcs(ctx);
 +		lgd_sic_dump_power_mode(ctx, "kept");
 +		return 0;
 +	}
@@ -403,6 +459,7 @@ index 000000000..769649da0
 +		return ret;
 +	}
 +
++	lgd_sic_send_test_dcs(ctx);
 +	lgd_sic_dump_power_mode(ctx, "after init");
 +
 +	return 0;
@@ -515,6 +572,7 @@ index 000000000..769649da0
 +
 +	ctx->dsi[0] = dsi;
 +	mipi_dsi_set_drvdata(dsi, ctx);
++	lgd_sic_dev = ctx;
 +
 +	ctx->panel.prepare_prev_first = true;
 +
@@ -552,6 +610,7 @@ index 000000000..769649da0
 +{
 +	struct lgd_sic *ctx = mipi_dsi_get_drvdata(dsi);
 +
++	lgd_sic_dev = NULL;
 +	drm_panel_remove(&ctx->panel);
 +}
 +
