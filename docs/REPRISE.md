@@ -258,3 +258,13 @@ PM8941 gpio19 vu dans /sys/kernel/debug/gpio : out, high, normal, vin-2
 r41 : paramètres de test `reset_pulse` (écrire N : reset tenu N ms, à
 chaud) et `test_dcs` (commande DCS sans paramètre en fin de prepare, ex.
 0x21 = inversion des couleurs).
+
+Résultats r41 : reset_pulse (50 et 500 ms) sans effet → la GPIO 19 ne remet
+pas ce panneau à zéro (ligne à revoir : variante de carte ?). test_dcs=0x21
+→ couleurs inversées : les commandes DCS passent (au prepare, en LP,
+broadcast DSI1).
+Fantôme au rallumage expliqué : flux vidéo coupé sans sleep in, reset
+inopérant, puis sleep out/display on sur un panneau qui se croit éveillé.
+r42 : étapes 0x20 (soft reset DCS 0x01 + 120 ms) et 0x40 (display off +
+sleep in + 120 ms) avant la table. À tester à chaud :
+init_steps=0x4e ou 0x2e puis extinction/rallumage.

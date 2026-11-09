@@ -47,7 +47,7 @@ new file mode 100644
 index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,584 @@
+@@ -0,0 +1,608 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -118,6 +118,8 @@ index 000000000..769649da0
 +#define LGD_SIC_STEP_TABLE	BIT(2)	/* vendor register table */
 +#define LGD_SIC_STEP_ON		BIT(3)	/* sleep out + display on */
 +#define LGD_SIC_STEP_HS		BIT(4)	/* send the commands in HS mode */
++#define LGD_SIC_STEP_SOFT_RESET	BIT(5)	/* DCS soft reset (0x01), 120 ms */
++#define LGD_SIC_STEP_SLEEP_CYCLE BIT(6)	/* display off + sleep in, 120 ms */
 +#define LGD_SIC_STEPS_DEFAULT	(LGD_SIC_STEP_RESET | LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON)
 +
 +static unsigned int init_steps = LGD_SIC_STEPS_DEFAULT;
@@ -171,7 +173,7 @@ index 000000000..769649da0
 +MODULE_PARM_DESC(reset_pulse, "write N: assert the panel reset for N ms (test)");
 +module_param(init_steps, uint, 0644);
 +MODULE_PARM_DESC(init_steps,
-+		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands (default 14)");
++		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands, 32 DCS soft reset, 64 sleep in first (default 14)");
 +
 +/*
 + * Downstream uses "broadcast mode": the same commands go to both links.
@@ -249,6 +251,28 @@ index 000000000..769649da0
 +	if (steps & LGD_SIC_STEP_HS)
 +		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++)
 +			ctx->dsi[i]->mode_flags &= ~MIPI_DSI_MODE_LPM;
++
++	/*
++	 * The reset line (PM8941 GPIO 19) has no visible effect on this
++	 * panel, so it cannot be relied on to bring it back to a known
++	 * state: do it with DCS commands instead, before the init.
++	 */
++	if (steps & LGD_SIC_STEP_SLEEP_CYCLE) {
++		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++			dsi_ctx.dsi = ctx->dsi[i];
++			mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
++			mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
++		}
++		mipi_dsi_msleep(&dsi_ctx, 120);
++	}
++
++	if (steps & LGD_SIC_STEP_SOFT_RESET) {
++		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++			dsi_ctx.dsi = ctx->dsi[i];
++			mipi_dsi_dcs_soft_reset_multi(&dsi_ctx);
++		}
++		mipi_dsi_msleep(&dsi_ctx, 120);
++	}
 +
 +	if (steps & LGD_SIC_STEP_TABLE) {
 +		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
