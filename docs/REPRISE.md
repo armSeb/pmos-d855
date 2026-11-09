@@ -72,8 +72,18 @@ plus de soft reset DCS en tête d'init ; 120 ms après le sleep out.
 pkgrel 30 : toujours noir (fantôme). Vérifié en mode msm : lcd-vpos/vneg
 activés à 5,5 V, L10/L12 à 1,8 V, GPIO 56/91/100 à 1, reset PM8941 GPIO19
 à 1 (relâché). L10 était en mode « idle » (LPM, charge 0) : pkgrel 31 lui
-déclare la charge LG de 100 mA (HPM). Reste à lire le TPS65132 avec
-`i2cget -f -y 2 0x3e 0x00` (0x01, 0x03) : sans -f, le pilote occupe l'adresse.
+déclare la charge LG de 100 mA (HPM).
+
+TPS65132 relu en mode msm (`i2cget -f -y 2 0x3e`, avant pkgrel 31) :
+0x00 = 0x0f (VPOS 4,0 + 15 × 0,1 = 5,5 V), 0x01 = 0x0f (VNEG −5,5 V),
+0x03 = 0x43 (décharges actives VPOS/VNEG + bit 6 APPS = 1). Le pilote mainline
+n'écrit jamais APPS et le cycle d'alimentation de pkgrel 30 recharge les
+registres depuis l'EEPROM : 0x43 est la valeur programmée par LG. Tensions et
+mode conformes : l'alimentation VSP/VSN est écartée comme cause.
+
+Rappel : avec `keep_init` (aucun reset, aucune init), l'écran devenait noir
+aussi. Le panneau perd donc son état, ou cesse d'afficher, au moment où msm
+prend la main, indépendamment de notre séquence d'init.
 Prochaine piste : l'ordre des étapes côté DSI quand msm prend la main
 (coupure du GDSC MDSS entre la sonde et l'activation, LP11 avant reset).
 
