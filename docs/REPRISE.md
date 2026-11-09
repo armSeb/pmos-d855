@@ -107,6 +107,13 @@ avec `keep_init=1` : si l'image reste après le bind de msm, la chaîne vidéo
 msm est bonne ; sinon, regarder le trou entre le retrait de simpledrm
 (aperture) et le premier modeset.
 
+pkgrel 32 + `keep_init=1` : **affichage natif OK** (console visible via
+msm, split display DSI0+DSI1). Le rétroéclairage s'éteint à la sonde du
+LM3697 puis se rallume, mais bien plus faible qu'au bootloader :
+default-brightness-level = 177 sur 2047 (11 bits) avec le mappage
+exponentiel par défaut du LM3697 (registre 0x16 = 0x00). Reste : la
+séquence d'init du panneau (reset + init) sans keep_init.
+
 Rappel : avec `keep_init` (aucun reset, aucune init), l'écran devenait noir
 aussi. Le panneau perd donc son état, ou cesse d'afficher, au moment où msm
 prend la main, indépendamment de notre séquence d'init.
