@@ -1,0 +1,31 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: mmcc-msm8974: don't park mdp_clk_src at registration
+
+mdp_clk_src uses clk_rcg2_shared_ops, whose .init parks the RCG on XO
+when the clock is registered. When the bootloader leaves the display
+running (continuous splash, used by simple-framebuffer/simpledrm), this
+drops the MDP core clock from 240 MHz (GPLL0/2.5, CFG=0x504) to
+19.2 MHz under the live scanout: the MDP underflows within the first
+second of boot and the panel shows a solid color.
+
+A regmap trace of the mmcc probe on the LG G3 (D855) shows this as the
+only write that affects the display: CFG 0x2044 0x504 -> 0x0. MMPLL1 and
+MMPLL3, which are reprogrammed too, were off.
+
+Use clk_rcg2_shared_no_init_park_ops: the clock keeps its bootloader
+configuration until a consumer (the MDSS driver) takes it over, and
+parking on disable is kept.
+
+diff --git a/drivers/clk/qcom/mmcc-msm8974.c b/drivers/clk/qcom/mmcc-msm8974.c
+index a0f7a9116..5c3a5ad26 100644
+--- a/drivers/clk/qcom/mmcc-msm8974.c
++++ b/drivers/clk/qcom/mmcc-msm8974.c
+@@ -486,7 +486,7 @@ static struct clk_rcg2 mdp_clk_src = {
+ 		.name = "mdp_clk_src",
+ 		.parent_data = mmcc_xo_mmpll0_dsi_hdmi_gpll0,
+ 		.num_parents = ARRAY_SIZE(mmcc_xo_mmpll0_dsi_hdmi_gpll0),
+-		.ops = &clk_rcg2_shared_ops,
++		.ops = &clk_rcg2_shared_no_init_park_ops,
+ 	},
+ };
+ 
