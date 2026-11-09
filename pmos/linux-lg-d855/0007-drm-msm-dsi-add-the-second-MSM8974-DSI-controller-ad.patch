@@ -1,0 +1,25 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: add the second MSM8974 DSI controller address
+
+The MSM8974/APQ8084 config only lists 0xfd922800 and 0xfd922b00, but on
+MSM8974 the second DSI controller (DSI1) is at 0xfd922e00 (see
+qcom-msm8974.dtsi; 0xfd922b00 is DSI0's PHY there). Probing DSI1, e.g.
+for a bonded dual-DSI panel such as the LG G3's, fails with:
+
+  msm_dsi fd922e00.dsi: msm_dsi_host_init: unable to identify DSI host index
+
+Add an MSM8974 variant.
+
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_cfg.c b/drivers/gpu/drm/msm/dsi/dsi_cfg.c
+index 7675558ae..5099c7e38 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_cfg.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_cfg.c
+@@ -44,6 +44,8 @@ static const struct msm_dsi_config msm8974_apq8084_dsi_cfg = {
+ 	.num_bus_clks = ARRAY_SIZE(dsi_6g_bus_clk_names),
+ 	.io_start = {
+ 		{ 0xfd922800, 0xfd922b00 },
++		/* MSM8974: the second DSI controller is at 0xfd922e00 */
++		{ 0xfd922800, 0xfd922e00 },
+ 	},
+ };
+ 

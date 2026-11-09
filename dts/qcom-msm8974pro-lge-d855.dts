@@ -77,9 +77,21 @@
 			height = <2560>;
 			stride = <(1440 * 3)>;
 			format = "r8g8b8";
-			/* taille physique (width-mm/height-mm) : phoc en déduit l'échelle */
-			panel = <&panel>;
+			/*
+			 * Taille physique (width-mm/height-mm) pour simpledrm : phoc
+			 * en déduit l'échelle. Nœud désactivé exprès : la propriété
+			 * « panel » crée un lien fw_devlink, et pointer le vrai
+			 * panneau (DSI) retarderait simpledrm jusqu'à ~25 s.
+			 */
+			panel = <&fb_panel>;
 		};
+	};
+
+	/* dimensions de l'écran pour simpledrm (voir chosen/framebuffer) */
+	fb_panel: framebuffer-panel {
+		width-mm = <68>;
+		height-mm = <121>;
+		status = "disabled";
 	};
 
 	reserved-memory {
