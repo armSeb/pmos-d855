@@ -110,19 +110,19 @@ index 000000000..769649da0
 +/*
 + * Bring-up aid: which parts of the power-up sequence prepare() runs, to
 + * bisect the panel init. keep_init=1 is init_steps=0 for the first prepare.
++ * The DSV power cycle leaves the panel black: off by default (14).
 + */
 +#define LGD_SIC_STEP_DSV_CYCLE	BIT(0)	/* switch VSP/VSN off and on once */
 +#define LGD_SIC_STEP_RESET	BIT(1)	/* hold reset during power-up */
 +#define LGD_SIC_STEP_TABLE	BIT(2)	/* vendor register table */
 +#define LGD_SIC_STEP_ON		BIT(3)	/* sleep out + display on */
 +#define LGD_SIC_STEP_HS		BIT(4)	/* send the commands in HS mode */
-+#define LGD_SIC_STEPS_DEFAULT	(LGD_SIC_STEP_DSV_CYCLE | LGD_SIC_STEP_RESET | \
-+				 LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON)
++#define LGD_SIC_STEPS_DEFAULT	(LGD_SIC_STEP_RESET | LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON)
 +
 +static unsigned int init_steps = LGD_SIC_STEPS_DEFAULT;
 +module_param(init_steps, uint, 0644);
 +MODULE_PARM_DESC(init_steps,
-+		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands (default 15)");
++		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands (default 14)");
 +
 +/*
 + * Downstream uses "broadcast mode": the same commands go to both links.

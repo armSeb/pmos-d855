@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=16
+pkgrel=17
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"

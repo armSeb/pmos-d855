@@ -177,3 +177,12 @@ utilisable en attendant) ; tests au démarrage avec
 ligne de commande. Ordre proposé : 8 (sleep out/display on seuls), 12
 (table + on, sans reset), 14 (reset + table + on, sans cycle DSV), 15, puis
 +16 (HS) sur celui qui échoue.
+
+Bissection `init_steps` (keep_init=0) : 8, 12 et 14 affichent, 15 reste
+noir. Le cycle VSP/VSN (coupure 20 ms puis rallumage) est le seul coupable ;
+reset + table LG + sleep out/display on sont corrects.
+linux-lg-d855 r35 : défaut 14 (sans cycle DSV) ; device-lg-d855 r17 :
+keep_init retiré de modprobe.d. À vérifier : extinction/rallumage de
+l'écran sous Phosh (unprepare coupe VSP/VSN et met le reset, le prepare
+suivant est une vraie remise sous tension, proche du cas 15).
+Rétroéclairage encore faible : vérifier brightness et le registre 0x16.
