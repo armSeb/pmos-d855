@@ -3,16 +3,18 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=19
+pkgrel=20
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
 options="!check !archcheck"
 # Outils de bring-up : bus I2C (i2c-tools), GPIO (libgpiod), entrées
 # (evtest), USB (usbutils), WiFi (iw, wpa_supplicant), BT (bluez),
-# traçage (strace).
+# traçage (strace). Microcode du GPU Adreno 330 (a330_pm4/pfp.fw) :
+# linux-firmware-qcom, sans quoi le GPU ne démarre pas et Phosh non plus.
 depends="
 	linux-lg-d855
+	linux-firmware-qcom
 	mkbootimg
 	postmarketos-base
 	evtest

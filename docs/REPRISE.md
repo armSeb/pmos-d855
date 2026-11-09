@@ -221,3 +221,10 @@ gnome-control-center (GTK4), y compris à fréquence GPU fixe (pas devfreq).
 dans GTK, seul « ngl » reste, et il bloque l'A330). device-lg-d855 r19 :
 GSK_RENDERER=cairo dans /etc/profile.d et /usr/lib/environment.d (services
 utilisateur systemd/D-Bus). À revoir quand Mesa/freedreno a3xx progresse.
+
+Carte refaite (install-sdcard, Phosh par défaut) : console mais pas de
+Phosh. linux-firmware-qcom (microcode a330) n'était installé qu'à la main
+sur l'ancienne carte : device-lg-d855 r20 en dépend.
+USB : le gadget n'est vu par le PC que si le câble est branché au démarrage.
+Pas de détection VBUS côté ChipIdea (pas d'extcon sur le nœud usb) : à
+câbler (extcon du chargeur bq24296 ou du PM8941).
