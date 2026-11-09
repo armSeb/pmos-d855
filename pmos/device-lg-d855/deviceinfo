@@ -44,4 +44,7 @@ deviceinfo_flash_pagesize="2048"
 # /boot/extlinux/extlinux.conf sur la carte : rien à flasher à chaque mise
 # à jour du noyau. Le boot.img reste généré pour fastboot boot.
 deviceinfo_generate_extlinux_config="true"
+# lk (lib/partition) ne lit que les tables MBR, et son pilote ext2 ne gère pas
+# les extents : carte en msdos, pmOS_boot en ext2 (défaut de pmbootstrap).
+deviceinfo_partition_type="msdos"
 deviceinfo_flash_sparse="true"

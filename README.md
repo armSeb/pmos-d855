@@ -173,8 +173,10 @@ fastboot boot out/lk2nd-msm8974.img          # essai en RAM, depuis lk2nd (Vol�
 LK2ND_IMG=out/lk2nd-msm8974.img tools/flash-lk2nd.sh   # puis flash (bump inclus)
 ```
 
-La partition `pmOS_boot` doit être en ext2 (défaut de pmbootstrap ; le
-pilote de lk ne lit pas l'ext4).
+Contraintes de lk : table de partitions **MBR** (son lecteur ignore le GPT,
+d'où `deviceinfo_partition_type="msdos"`) et `pmOS_boot` en **ext2** (pas
+d'extents). Pour convertir une carte GPT existante sans perdre les données,
+depuis le PC, carte démontée : `sudo sgdisk --gpttombr=1:2 /dev/sdX`.
 
 Secours, si la lecture de la carte échoue : `lk2nd-flash-boot` (paquet
 `device-lg-d855`, désactivé par défaut) recopie `/boot/boot.img` dans la
