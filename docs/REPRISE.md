@@ -186,3 +186,6 @@ keep_init retiré de modprobe.d. À vérifier : extinction/rallumage de
 l'écran sous Phosh (unprepare coupe VSP/VSN et met le reset, le prepare
 suivant est une vraie remise sous tension, proche du cas 15).
 Rétroéclairage encore faible : vérifier brightness et le registre 0x16.
+
+r36 : rétroéclairage en mappage linéaire (`ti,linear-mapping-mode` sur le
+nœud LED, registre 0x16 = 0x01, ajouté au patch 0008), niveau 1600 conservé.

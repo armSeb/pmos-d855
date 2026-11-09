@@ -148,8 +148,8 @@
 		compatible = "led-backlight";
 		leds = <&lcd_led>;
 		/*
-		 * Échelle 0-2047 (LM3697 11 bits, mappage exponentiel par défaut) :
-		 * 1600 donne à peu près la luminosité du bootloader.
+		 * Échelle 0-2047 (LM3697 11 bits, mappage linéaire) : 1600 donne
+		 * à peu près la luminosité du bootloader.
 		 */
 		default-brightness-level = <1600>;
 		status = "okay";
@@ -281,6 +281,8 @@
 			reg = <0>;
 			led-sources = <0 1>;	/* HVLED1 + HVLED2 (rev >= c) */
 			ti,brightness-resolution = <2047>;
+			/* mappage linéaire (patch noyau 0008) : l'exponentiel est trop sombre */
+			ti,linear-mapping-mode;
 			label = "lcd-backlight";
 		};
 	};
