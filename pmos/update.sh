@@ -6,6 +6,9 @@
 #   pmos/update.sh                       # téléphone en 172.16.42.1 (USB)
 #   HOST=192.168.1.42 pmos/update.sh     # autre adresse
 #   NO_BOOT=1 pmos/update.sh             # installer seulement
+#   BOOT_ONLY=1 pmos/update.sh           # ni build ni installation : récupère
+#                                        # /boot/boot.img (régénéré par apk, ex.
+#                                        # après apk add/upgrade) et le démarre
 #   CMDLINE="... sdhci.debug_quirks2=0x4" pmos/update.sh
 #                                        # remplace la ligne de commande
 #
@@ -27,16 +30,19 @@ work=$(pmbootstrap config work) || die "pas de config pmbootstrap"
 . "$here/common.sh"
 aports="$work/cache_git/pmaports"
 
-step "Paquets"
-"$here/sync.sh" "$aports"
-release_chroots
-pmbootstrap checksum $pkgs
-pmbootstrap build $pkgs
+ping -c1 -W2 "$host" >/dev/null 2>&1 || die "$host ne répond pas (téléphone démarré, câble USB ? HOST=<ip wifi> sinon)"
 
-step "Installation sur $user@$host"
-ping -c1 -W2 "$host" >/dev/null 2>&1 || die "$host ne répond pas (téléphone démarré, câble USB ?)"
-pmbootstrap sideload --host "$host" --user "$user" --arch armv7 $pkgs
-release_chroots
+if [ -z "${BOOT_ONLY:-}" ]; then
+	step "Paquets"
+	"$here/sync.sh" "$aports"
+	release_chroots
+	pmbootstrap checksum $pkgs
+	pmbootstrap build $pkgs
+
+	step "Installation sur $user@$host"
+	pmbootstrap sideload --host "$host" --user "$user" --arch armv7 $pkgs
+	release_chroots
+fi
 
 step "Récupération du boot.img régénéré"
 mkdir -p "$top/out"
