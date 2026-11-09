@@ -44,10 +44,10 @@ index f35ada096..fa49857cc 100644
 +obj-$(CONFIG_DRM_PANEL_LGE_G3_LGD_SIC) += panel-lge-g3-lgd-sic.o
 diff --git a/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
 new file mode 100644
-index 000000000..c6538108a
+index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,456 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -86,6 +86,7 @@ index 000000000..c6538108a
 +	struct mipi_dsi_device *dsi[2];
 +	struct regulator_bulk_data supplies[ARRAY_SIZE(lgd_sic_supply_names)];
 +	struct gpio_desc *reset_gpio;
++	bool dsv_cycled;
 +};
 +
 +static inline struct lgd_sic *to_lgd_sic(struct drm_panel *panel)
@@ -98,21 +99,13 @@ index 000000000..c6538108a
 + * reset, initialized) on the first prepare, without resetting it or sending
 + * the init sequence. Tells a video-path problem from a panel-init problem.
 + */
++static bool debug_reads;
++module_param(debug_reads, bool, 0644);
++MODULE_PARM_DESC(debug_reads, "read back DCS registers around the init sequence");
++
 +static bool keep_init;
 +module_param(keep_init, bool, 0644);
 +MODULE_PARM_DESC(keep_init, "keep the bootloader panel state on first prepare");
-+
-+static void lgd_sic_reset(struct lgd_sic *ctx)
-+{
-+	/*
-+	 * Vendor reset sequence is just <1 5> (release reset, wait 5 ms).
-+	 * Pulse it first so the panel always starts from a known state.
-+	 */
-+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+	usleep_range(1000, 2000);
-+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-+	usleep_range(5000, 6000);
-+}
 +
 +/*
 + * Downstream uses "broadcast mode": the same commands go to both links.
@@ -120,9 +113,6 @@ index 000000000..c6538108a
 + */
 +static void lgd_sic_on_link(struct mipi_dsi_multi_context *dsi_ctx)
 +{
-+	mipi_dsi_dcs_soft_reset_multi(dsi_ctx);
-+	mipi_dsi_msleep(dsi_ctx, 5);
-+
 +	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb0, 0xac);
 +	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb1, 0x47, 0xf0, 0x80, 0x00, 0x00);
 +	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb2, 0x77, 0x28, 0x27);
@@ -199,7 +189,7 @@ index 000000000..c6538108a
 +		dsi_ctx.dsi = ctx->dsi[i];
 +		mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
 +	}
-+	mipi_dsi_msleep(&dsi_ctx, 5);	/* vendor value; 120 ms if unstable */
++	mipi_dsi_msleep(&dsi_ctx, 120);
 +
 +	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
 +		dsi_ctx.dsi = ctx->dsi[i];
@@ -251,6 +241,9 @@ index 000000000..c6538108a
 +	int i, l, n, ret;
 +	u8 val;
 +
++	if (!debug_reads)
++		return;
++
 +	for (l = 0; l < ARRAY_SIZE(ctx->dsi); l++) {
 +		n = 0;
 +		for (i = 0; i < ARRAY_SIZE(regs); i++) {
@@ -271,34 +264,69 @@ index 000000000..c6538108a
 +{
 +	struct lgd_sic *ctx = to_lgd_sic(panel);
 +	struct device *dev = &ctx->dsi[0]->dev;
++	struct regulator *vdd = ctx->supplies[0].consumer;
++	struct regulator *vsp = ctx->supplies[1].consumer;
++	struct regulator *vsn = ctx->supplies[2].consumer;
 +	int ret;
-+
-+	/* vdd (1.8 V) first, then the +/-5.5 V DSV outputs */
-+	ret = regulator_enable(ctx->supplies[0].consumer);
-+	if (ret < 0) {
-+		dev_err(dev, "Failed to enable vdd: %d\n", ret);
-+		return ret;
-+	}
-+	usleep_range(1000, 2000);
-+
-+	ret = regulator_enable(ctx->supplies[1].consumer);
-+	if (ret < 0)
-+		goto err_vdd;
-+	ret = regulator_enable(ctx->supplies[2].consumer);
-+	if (ret < 0)
-+		goto err_vsp;
-+	usleep_range(5000, 6000);
 +
 +	if (keep_init) {
 +		keep_init = false;
++		ret = regulator_bulk_enable(ARRAY_SIZE(ctx->supplies),
++					    ctx->supplies);
++		if (ret < 0)
++			return ret;
++		ctx->dsv_cycled = true;
 +		dev_info(dev, "keeping the bootloader panel state\n");
 +		lgd_sic_dump_power_mode(ctx, "kept");
 +		return 0;
 +	}
 +
-+	lgd_sic_dump_power_mode(ctx, "before reset");
-+	lgd_sic_reset(ctx);
-+	lgd_sic_dump_power_mode(ctx, "after reset");
++	/* Hold the panel in reset while its rails come up. */
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++
++	ret = regulator_enable(vdd);
++	if (ret < 0) {
++		dev_err(dev, "Failed to enable vdd: %d\n", ret);
++		return ret;
++	}
++
++	/*
++	 * The bootloader leaves the DSV (TPS65132) outputs on, but the
++	 * regulator framework starts with them "off": switch them on and off
++	 * once so the panel gets a real power cycle the first time.
++	 */
++	if (!ctx->dsv_cycled) {
++		ctx->dsv_cycled = true;
++		if (!regulator_enable(vsn))
++			regulator_disable(vsn);
++		if (!regulator_enable(vsp))
++			regulator_disable(vsp);
++		msleep(20);
++	}
++
++	/*
++	 * Vendor order (mdss_dsi_panel_reset, LG): VSP, 5 ms, reset released
++	 * (rst-seq <1 5>), then VSN; output voltages reprogrammed after each
++	 * enable since the TPS65132 may lose them while disabled.
++	 */
++	ret = regulator_enable(vsp);
++	if (ret < 0)
++		goto err_vdd;
++	usleep_range(500, 1000);
++	regulator_sync_voltage(vsp);
++	usleep_range(5000, 6000);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(5000, 6000);
++
++	ret = regulator_enable(vsn);
++	if (ret < 0)
++		goto err_vsp;
++	usleep_range(500, 1000);
++	regulator_sync_voltage(vsn);
++	usleep_range(10000, 11000);
++
++	lgd_sic_dump_power_mode(ctx, "after power-up");
 +
 +	ret = lgd_sic_on(ctx);
 +	if (ret < 0) {
@@ -312,11 +340,11 @@ index 000000000..c6538108a
 +	return 0;
 +
 +err_vsn:
-+	regulator_disable(ctx->supplies[2].consumer);
++	regulator_disable(vsn);
 +err_vsp:
-+	regulator_disable(ctx->supplies[1].consumer);
++	regulator_disable(vsp);
 +err_vdd:
-+	regulator_disable(ctx->supplies[0].consumer);
++	regulator_disable(vdd);
 +	return ret;
 +}
 +

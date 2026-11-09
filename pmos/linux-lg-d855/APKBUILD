@@ -4,7 +4,7 @@
 # Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
 pkgname=linux-lg-d855
 pkgver=6.16.12
-pkgrel=29
+pkgrel=30
 pkgdesc="LG G3 (D855) mainline kernel"
 arch="armv7"
 _carch="arm"

@@ -60,6 +60,15 @@ relecture par DSI1 ne renseigne pas sur l'état du panneau.
 pkgrel 28 : essai sans `qcom,sync-dual-dsi` (commandes envoyées et relues
 séparément sur chaque lien, broadcast inactif).
 
+pkgrel 28-29 (sans sync) : DSI0 ne répond à aucune lecture (RDBK vide,
+ACK_ERR_STATUS 0x10000000, erreurs PHY lane 0), DSI1 répond toujours 0x00.
+Les relectures ne disent rien de l'état du panneau ; elles sont désormais
+désactivées par défaut (`debug_reads=1` pour les remettre).
+pkgrel 30 : retour au sync/broadcast et séquence d'allumage calquée sur LG :
+reset maintenu, vrai cycle d'alimentation du TPS65132 au premier prepare,
+VSP, 5 ms, reset relâché, VSN, tensions reprogrammées après chaque enable ;
+plus de soft reset DCS en tête d'init ; 120 ms après le sleep out.
+
 Pistes suivantes si 0x9c n'apparaît pas :
 - comparer la séquence d'init du panel avec le downstream (mode LP, délais,
   ordre reset/alims) ;
