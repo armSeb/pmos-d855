@@ -38,7 +38,7 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 | Chargeur | bq24296 @ blsp1_i2c1 0x6b | activé | oui (`bq24190_charger`) |
 | Jauge | MAX17048 @ 0x36, IRQ TLMM 9 | activé | oui (`max17040_battery`) |
 | Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé, **testé** | oui (RMI4) |
-| WiFi | WCNSS Pronto + iris WCN3680 (interne au SoC) | activé | oui (`wcn36xx`, firmware requis) |
+| WiFi | WCNSS Pronto + iris WCN3680 (interne au SoC) | **testé** ✓ | oui (`wcn36xx`, firmware via `extract-firmware`) |
 | Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
 | Panel | LGD SIC 1440p, vidéo, **double DSI** | décrit, désactivé | driver écrit (patch 0002) ; **MDP5 ne gère pas le DSI couplé** |
