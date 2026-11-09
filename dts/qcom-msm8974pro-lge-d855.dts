@@ -245,6 +245,13 @@
 
 		enable-gpios = <&tlmm 91 GPIO_ACTIVE_HIGH>;
 
+		/*
+		 * OVP du convertisseur à 24 V, comme le pilote LG (registre 0x1a =
+		 * 0x02, patch noyau 0008). Avec les 16 V par défaut, le
+		 * convertisseur reste en protection : pas de rétroéclairage.
+		 */
+		ti,ovp-microvolt = <24000000>;
+
 		#address-cells = <1>;
 		#size-cells = <0>;
 

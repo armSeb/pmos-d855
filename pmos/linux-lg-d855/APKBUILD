@@ -4,7 +4,7 @@
 # Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
 pkgname=linux-lg-d855
 pkgver=6.16.12
-pkgrel=21
+pkgrel=22
 pkgdesc="LG G3 (D855) mainline kernel"
 arch="armv7"
 _carch="arm"
@@ -47,6 +47,7 @@ source="
 	0005-drm-msm-adreno-add-headless_gpu-parameter.patch
 	0006-drm-msm-mdp5-support-bonded-DSI-split-display-withou.patch
 	0007-drm-msm-dsi-add-the-second-MSM8974-DSI-controller-ad.patch
+	0008-leds-lm3697-add-boost-over-voltage-protection-setti.patch
 	"
 builddir="$srcdir/linux-$_commit"
 
