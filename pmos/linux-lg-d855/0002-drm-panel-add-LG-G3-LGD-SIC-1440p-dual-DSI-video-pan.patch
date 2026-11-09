@@ -47,7 +47,7 @@ new file mode 100644
 index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,507 @@
+@@ -0,0 +1,513 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
@@ -367,9 +367,15 @@ index 000000000..769649da0
 +rails_up:
 +	if (ctx->rails_on && (steps & LGD_SIC_STEP_RESET) &&
 +	    gpiod_get_value_cansleep(ctx->reset_gpio)) {
-+		/* reset held since unprepare: release it, vendor delay */
++		/*
++		 * Screen unblank: reset held since unprepare. At boot the panel
++		 * gets 5 ms after reset, then the VSN enable and 10 ms more
++		 * before the first command; give it at least as long here
++		 * (5 ms alone leaves it black, a fading ghost on screen).
++		 */
++		usleep_range(10000, 11000);
 +		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-+		usleep_range(5000, 6000);
++		msleep(20);
 +	}
 +
 +	if (!(steps & (LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON))) {

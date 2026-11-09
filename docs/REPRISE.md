@@ -231,3 +231,13 @@ câbler (extcon du chargeur bq24296 ou du PM8941).
 device-lg-d855 r21 : extract-firmware lancé au premier démarrage
 (extract-firmware-lg-d855.service, activé d'office, condition : wcnss.mdt
 absent), puis relance des remoteprocs restés « offline » (WCNSS).
+
+Carte neuve (install-sdcard, linux r38 / device r21) : Phosh, GPU, WiFi,
+firmwares OK d'emblée.
+Rallumage de l'écran : fantôme qui s'efface, même avec
+`power/control = on` sur display-subsystem (le GDSC n'est donc pas seul en
+cause). À l'extinction : « wait for video done timed out » sur DSI1 puis
+SET_DISPLAY_OFF -110 (commande refusée, vidéo encore active) ; le reset
+est mis quand même. Au rallumage (r38), seulement 5 ms entre la levée du
+reset et la première commande, contre ~15 ms au démarrage (5 ms + VSN +
+10 ms). r39 : 10 ms de reset tenu puis 20 ms après sa levée.
