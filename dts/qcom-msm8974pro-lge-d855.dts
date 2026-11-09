@@ -621,6 +621,9 @@
 			regulator-max-microvolt = <1800000>;
 			regulator-always-on;
 			regulator-boot-on;
+			/* charge déclarée par LG (100 mA) : mode HPM, pas idle */
+			regulator-system-load = <100000>;
+			regulator-allow-set-load;
 		};
 
 		pm8941_l11: l11 {

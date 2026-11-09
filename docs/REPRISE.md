@@ -69,6 +69,14 @@ reset maintenu, vrai cycle d'alimentation du TPS65132 au premier prepare,
 VSP, 5 ms, reset relâché, VSN, tensions reprogrammées après chaque enable ;
 plus de soft reset DCS en tête d'init ; 120 ms après le sleep out.
 
+pkgrel 30 : toujours noir (fantôme). Vérifié en mode msm : lcd-vpos/vneg
+activés à 5,5 V, L10/L12 à 1,8 V, GPIO 56/91/100 à 1, reset PM8941 GPIO19
+à 1 (relâché). L10 était en mode « idle » (LPM, charge 0) : pkgrel 31 lui
+déclare la charge LG de 100 mA (HPM). Reste à lire le TPS65132 avec
+`i2cget -f -y 2 0x3e 0x00` (0x01, 0x03) : sans -f, le pilote occupe l'adresse.
+Prochaine piste : l'ordre des étapes côté DSI quand msm prend la main
+(coupure du GDSC MDSS entre la sonde et l'activation, LP11 avant reset).
+
 Pistes suivantes si 0x9c n'apparaît pas :
 - comparer la séquence d'init du panel avec le downstream (mode LP, délais,
   ordre reset/alims) ;
