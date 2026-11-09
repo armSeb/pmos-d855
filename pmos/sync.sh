@@ -15,7 +15,7 @@ k="$here/linux-lg-d855"
 
 cp "$top/dts/qcom-msm8974pro-lge-d855.dts" "$k/"
 cp "$top/tools/devmem32/devmem32.c" "$top/tools/mdp-dump.sh" \
-   "$top/tools/extract-firmware.sh" "$here/device-lg-d855/"
+   "$top/tools/extract-firmware.sh" "$top/tools/mmcc-trace.sh" "$here/device-lg-d855/"
 [ -f "$k/config-lg-d855.armv7" ] || {
 	echo "manque $k/config-lg-d855.armv7 (lancer pmos/make-config.sh)" >&2; exit 1; }
 

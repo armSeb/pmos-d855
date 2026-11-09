@@ -6,3 +6,4 @@
 /pmos/device-lg-d855/devmem32.c
 /pmos/device-lg-d855/mdp-dump.sh
 /pmos/device-lg-d855/extract-firmware.sh
+/pmos/device-lg-d855/mmcc-trace.sh

@@ -3,7 +3,7 @@
 pkgname=device-lg-d855
 pkgdesc="LG G3 (International)"
 pkgver=3
-pkgrel=10
+pkgrel=11
 url="https://github.com/armSeb/pmos-d855"
 license="MIT"
 arch="armv7"
@@ -33,6 +33,8 @@ source="
 	lk2nd-flash-boot
 	lk2nd-flash-boot.service
 	lk2nd-flash-boot.path
+	mmcc-trace.sh
+	modprobe-lg-d855.conf
 	"
 
 build() {
@@ -47,6 +49,8 @@ package() {
 	install -Dm755 devmem32 "$pkgdir"/usr/bin/devmem32
 	install -Dm755 "$srcdir"/mdp-dump.sh "$pkgdir"/usr/bin/mdp-dump
 	install -Dm755 "$srcdir"/extract-firmware.sh "$pkgdir"/usr/bin/extract-firmware
+	install -Dm755 "$srcdir"/mmcc-trace.sh "$pkgdir"/usr/bin/mmcc-trace
+	install -Dm644 "$srcdir"/modprobe-lg-d855.conf "$pkgdir"/etc/modprobe.d/lg-d855.conf
 
 	# Secours si lk2nd ne lit pas la microSD : recopie /boot/boot.img
 	# derrière lk2nd (désactivé par défaut, voir README).

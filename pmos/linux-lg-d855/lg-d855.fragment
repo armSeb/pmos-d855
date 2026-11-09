@@ -57,3 +57,10 @@ CONFIG_REGULATOR_TPS65132=m
 CONFIG_DRM_PANEL_LGE_G3_LGD_SIC=m
 # Affichage via le framebuffer du bootloader (simple-framebuffer)
 CONFIG_DRM_SIMPLEDRM=y
+
+# mmcc-msm8974 en module : son probe casse l'affichage hérité du bootloader.
+# Non chargé au démarrage (blacklist dans device-lg-d855), on le charge à la
+# main avec la trace regmap pour trouver l'écriture fautive (GPU ensuite).
+CONFIG_MSM_MMCC_8974=m
+# GCC n'était built-in que par le select de MMCC : indispensable au boot
+CONFIG_MSM_GCC_8974=y
