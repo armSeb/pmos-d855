@@ -118,7 +118,7 @@
 		compatible = "led-backlight";
 		leds = <&lcd_led>;
 		default-brightness-level = <177>;
-		status = "disabled";	/* TODO : activer avec le panel */
+		status = "okay";
 	};
 
 	/* Boost "bb_boost" piloté par PM8941 GPIO21 (identique au Nexus 5) */
@@ -224,7 +224,7 @@
  * alimentations (sinon écran rose, voir README).
  */
 &blsp2_i2c5 {
-	status = "disabled";
+	status = "okay";
 	clock-frequency = <400000>;
 
 	lm3697: led-controller@36 {
@@ -244,7 +244,7 @@
 		};
 	};
 
-	/* TODO : vérifier le binding et les tensions (+/-5,5 V typ.) */
+	/* VSP/VSN du panneau (+5V5_DDVDH / -5V5_DDVDL sur le schéma) */
 	dsv: pmic@3e {
 		compatible = "ti,tps65132";
 		reg = <0x3e>;
@@ -276,15 +276,17 @@
  * chacun, commandes envoyées sur les deux liens. Driver :
  * panel-lge-g3-lgd-sic (patch 0002 du paquet noyau).
  *
- * DÉSACTIVÉ : le driver MDP5 mainline (MSM8974) ne sait pas piloter deux
- * interfaces DSI couplées. Le côté DSI (qcom,dual-dsi-mode) existe, mais
- * pas le côté MDP5. Ces nœuds décrivent le matériel pour le jour où ce
- * support existera ; en attendant, l'affichage passe par le framebuffer
- * laissé par le bootloader (voir chosen/framebuffer).
+ * Côté MDP5 : « split display » (patch noyau 0006), comme le bootloader :
+ * CTL0/LM0/INTF1 pour la moitié gauche, CTL1/LM1/INTF2 pour la droite,
+ * INTF2 synchronisé sur INTF1 (SPLIT_DPL). Le framebuffer du bootloader
+ * (simpledrm) sert de console jusqu'à ce que msm prenne la main.
+ *
+ * Câblage confirmé par le manuel de service (pages 216, 224, 235) : reset
+ * PM8941 GPIO 19, IOVCC L12, VSP/VSN TPS65132 (GPIO 56/100), rétroéclairage
+ * LM3697 (GPIO 91), tous deux sur l'I2C commun (BLSP11 = blsp2_i2c5).
  */
 /*
- * GPU Adreno 330, en mode « headless » (patch 0005, msm.headless_gpu=1) :
- * périphérique DRM de rendu seul, l'affichage restant sur simple-framebuffer.
+ * GPU Adreno 330, lié au pilote d'affichage msm.
  * - pas d'IOMMU GPU décrite pour la MSM8974 : msm.allow_vram_carveout=1 ;
  * - interconnects retirés : le chemin gfx-mem passe par mmssnoc, désactivé
  *   (son premier vote casse l'affichage hérité), et ocmem est optionnel.
@@ -297,7 +299,16 @@
 };
 
 &mdss {
-	status = "disabled";
+	status = "okay";
+};
+
+/*
+ * Bande passante du MDP : mdp0-mem passe normalement par mmssnoc, désactivé
+ * (voir plus bas). On vote sur BIMC, comme simpledrm le faisait.
+ */
+&mdp {
+	interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>;
+	interconnect-names = "mdp0-mem";
 };
 
 /*
@@ -321,6 +332,8 @@
 	qcom,master-dsi;
 	qcom,sync-dual-dsi;
 
+	status = "okay";
+
 	panel: panel@0 {
 		compatible = "lge,g3-panel-lgd-sic";
 		/* 5,5" 16:9 */
@@ -328,7 +341,8 @@
 		height-mm = <121>;
 		reg = <0>;
 
-		vdd-supply = <&pm8941_l10>;
+		/* IOVCC : L12 sur le schéma « RevB » (L10 sur l'ancien schéma bloc) */
+		vdd-supply = <&pm8941_l12>;
 		vsp-supply = <&vpos>;
 		vsn-supply = <&vneg>;
 		reset-gpios = <&pm8941_gpios 19 GPIO_ACTIVE_LOW>;
@@ -366,6 +380,8 @@
 
 &mdss_dsi0_phy {
 	vddio-supply = <&pm8941_l12>;
+
+	status = "okay";
 };
 
 &mdss_dsi1 {
@@ -379,6 +395,8 @@
 	/* En mode couplé, la PLL de DSI0 cadence les deux liens */
 	assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
 				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
+
+	status = "okay";
 };
 
 &mdss_dsi1_out {
@@ -388,6 +406,8 @@
 
 &mdss_dsi1_phy {
 	vddio-supply = <&pm8941_l12>;
+
+	status = "okay";
 };
 
 &pm8941_gpios {

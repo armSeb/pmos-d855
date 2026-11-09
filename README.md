@@ -209,13 +209,12 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
    seconde (trouvé par trace regmap avec `mmcc-trace`, patch 0004), et
    le bus multimédia (MMSS NoC) doit rester tel que le bootloader l'a réglé
    (driver désactivé, vote BIMC par simpledrm, patch 0003). ← **on en est là**
-3. Affichage natif. Le driver du panel est écrit
-   (`pmos/linux-lg-d855/0002-…patch`, compatible `lge,g3-panel-lgd-sic`)
-   et le DTS décrit DSI0 + DSI1 couplés, le rétroéclairage LM3697 et le
-   TPS65132, mais tout reste désactivé : le driver MDP5 mainline de la
-   MSM8974 ne sait pas piloter deux interfaces DSI couplées (seul le côté
-   DSI le gère, et DPU ne prend pas en charge la MSM8974). Il faudra
-   ajouter ce support à MDP5 avant de pouvoir l'activer.
+3. Affichage natif : MDP5 en « split display » (patch 0006), programmé comme
+   le bootloader (relevé `mdss-snapshot`) : CTL0/LM0/INTF1 + CTL1/LM1/INTF2,
+   INTF2 synchronisé sur INTF1 (`SPLIT_DPL`), deux pipes par plan. Panneau
+   (patch 0002), TPS65132 et LM3697 activés. ← **en test**
+   Retour arrière sans recompiler : ajouter `module_blacklist=msm` à la ligne
+   `append` de `/boot/extlinux/extlinux.conf` (console simpledrm).
 4. GPU : Adreno 330 en rendu seul (patch 0005, `msm.headless_gpu=1`,
    sans IOMMU : `allow_vram_carveout`), puis affichage natif pour l'accélération
    réelle. Phosh fonctionne déjà en rendu logiciel.
