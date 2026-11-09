@@ -12,6 +12,12 @@ blank.
 
 Set BROADCAST_EN on both hosts of a synchronized bonded pair.
 
+The trigger path already commits the DMA on both hosts whenever the
+pair is synchronized, reads included, but reads only prepared the
+trigger host. With broadcast enabled this made every read time out
+("Set max pkt size failed, -110"). Prepare both hosts for reads too,
+as downstream does.
+
 diff --git a/drivers/gpu/drm/msm/dsi/dsi.h b/drivers/gpu/drm/msm/dsi/dsi.h
 index 87496db20..fd5e30661 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi.h
@@ -67,7 +73,7 @@ index 4d75529c0..7d6734d37 100644
  {
  	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
 diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
-index ca400924d..ec64e2789 100644
+index ca400924d..3ab18fb1a 100644
 --- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
 @@ -103,6 +103,17 @@ static int dsi_mgr_setup_components(int id)
@@ -88,3 +94,18 @@ index ca400924d..ec64e2789 100644
  		/* Register slave host first, so that slave DSI device
  		 * has a chance to probe, and do not block the master
  		 * DSI device's probe.
+@@ -498,7 +509,13 @@ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ 	struct msm_dsi *msm_dsi0 = dsi_mgr_get_dsi(DSI_0);
+ 	struct mipi_dsi_host *host = msm_dsi->host;
+ 	bool is_read = (msg->rx_buf && msg->rx_len);
+-	bool need_sync = (IS_SYNC_NEEDED() && !is_read);
++	/*
++	 * With command broadcast, the trigger is always committed on both
++	 * hosts (see msm_dsi_manager_cmd_xfer_trigger()), reads included: the
++	 * non-trigger host must be prepared for reads too, or the transfer
++	 * never completes.
++	 */
++	bool need_sync = IS_SYNC_NEEDED();
+ 	int ret;
+ 
+ 	if (!msg->tx_buf || !msg->tx_len)
