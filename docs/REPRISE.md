@@ -1,9 +1,137 @@
-# Point de reprise — affichage natif (MDP5/DSI)
+# Point de reprise — affichage natif (MDP5/DSI) et GPU
 
 Note de passation entre sessions de travail. Le README reste la référence
 pour l'état général ; ce fichier décrit le chantier en cours.
 
-## Ce qui marche
+## État (linux-lg-d855 r43, device-lg-d855 r22)
+
+Acquis, testé sur le téléphone :
+- démarrage autonome (lk2nd → extlinux sur la microSD), carte créée par
+  `pmos/install-sdcard.sh` utilisable d'emblée (Phosh, firmwares, WiFi) ;
+- affichage natif : MDP5 en split display (DSI0 + DSI1 couplés, commandes
+  en broadcast), panneau repris tel que le bootloader l'a laissé ;
+- GPU Adreno 330 sous Phosh, rétroéclairage LM3697.
+
+Revue du 10 novembre, à valider sur le téléphone (rien n'a pu être testé
+sur le matériel ; les pilotes et le DTB compilent, la série de patches
+s'applique sur le commit épinglé) :
+
+1. **Panneau, séquence d'Android** (patch 0002 réécrit sur mdss_dsi.c /
+   mdss_dsi_panel.c de LG) :
+   - premier allumage : panneau du bootloader repris sans reset ni
+     commande (« continuous splash »), détecté par le reset relâché ;
+   - extinction : display off + sleep in dans `.disable`, pendant que la
+     vidéo tourne (dans `.unprepare`, l'interface du MDP est déjà arrêtée
+     et la commande expirait en -110), puis VSP/VSN coupés, 25 ms, reset ;
+   - rallumage : VDD, VSP (bascule 1-0-1 comme LG), 5 ms, reset relâché,
+     5 ms, VSN, puis soft reset DCS (0x01), table, sleep out, 5 ms,
+     display on. Le soft reset en tête, présent chez LG, avait été retiré
+     au pkgrel 30 : sans lui, sleep out est sans effet sur un contrôleur
+     qui se croit éveillé (le reset par GPIO 19 n'a aucun effet visible).
+2. **Horloge HS du DSI après l'init du panneau** (patch 0011) : msm
+   forçait la lane d'horloge en HS dès la mise sous tension de l'hôte,
+   avant le reset et les commandes. LG garde toutes les lanes en LP-11,
+   envoie les commandes, puis force l'horloge (mdss_dsi_unblank), et la
+   relâche après les commandes d'extinction (mdss_dsi_blank).
+3. **VSP/VSN à ±5,0 V** au lieu de ±5,5 V : valeur du pilote LG
+   (TPS65132_VREG_LV_50) et du bootloader (« Bringing 5000000uV into
+   5500000 » au démarrage). Le panneau était suralimenté de 10 %.
+4. **Rétroéclairage** : table de luminosité d'Android (256 niveaux, code
+   maximum 1892), défaut 242 (code 1599).
+5. **GPU** : fréquences d'Android (578 / 462,4 / 389 / 330 / 200 / 27 MHz ;
+   le RPM gère la tension du rail avec la fréquence, kgsl ne fait que
+   clk_set_rate), bridage thermique dès 80 °C (DEVFREQ_THERMAL).
+6. **Bus multimédia** : horloge AXI du MMSS NoC de 100 à 291,75 MHz par le
+   vote du GPU (mmssnoc réactivé, interconnects du GPU rétablis, vote
+   borné de simpledrm sur le chemin « bus », patch 0003). À 100 MHz le
+   bus passe 1,6 Go/s, dont 0,9 pour le balayage 1440p : le GPU ne pouvait
+   pas rendre 60 images par seconde.
+
+### Tests à faire avec r43
+```
+dmesg | grep -i -E "lgd|panel|dsi|mdp5|interconnect|devfreq|cooling|rcg"
+cat /sys/class/devfreq/fdb00000.gpu/available_frequencies
+sudo grep -E "mmss_axi|oxilicx_axi|mmss_s0" /sys/kernel/debug/clk/clk_summary
+sudo cat /sys/kernel/debug/interconnect/interconnect_summary
+sudo i2cget -f -y 2 0x3e 0x00    # 0x0a = 5,0 V
+```
+Puis extinction / rallumage de l'écran au bouton power, plusieurs fois.
+
+Réglages de repli, sans recompiler :
+| Symptôme | Essai |
+|---|---|
+| noir au rallumage | `echo 1 > /sys/module/panel_lge_g3_lgd_sic/parameters/keep_power` (VSP/VSN gardés), puis extinction/rallumage |
+| noir au rallumage | `echo 1 > /sys/module/msm/parameters/dsi_early_hs_clk` (horloge HS dès la mise sous tension, comme avant) |
+| erreurs -110 à l'extinction | `echo 0 > …/panel_lge_g3_lgd_sic/parameters/send_off` |
+| doute sur le soft reset | `echo 0 > …/panel_lge_g3_lgd_sic/parameters/soft_reset` |
+| écran bleu ou noir au démarrage | bus multimédia : remettre `&mmssnoc { status = "disabled"; }`, retirer le chemin « bus » du nœud framebuffer et remettre les deux `/delete-property/` du nœud `&gpu`, puis `DTB_ONLY=1 tools/build-kernel.sh` |
+| console simpledrm seule | `module_blacklist=msm` sur la ligne `append` |
+
+### Ce qui reste, par ordre d'effet attendu
+- **Fréquence du CPU** : aucun changement de fréquence (ni HFPLL ni
+  kraitcc dans le dtsi amont, CONFIG_KRAITCC absent). Les cœurs tournent
+  à la fréquence du bootloader ; Android monte à 2,5 GHz. C'est l'écart
+  principal de fluidité. Première mesure à faire : `sudo devmem32
+  0xf908a000` puis `sudo devmem32 0xf908a004` (mode et L du HFPLL du
+  cœur 0, adresse à confirmer : fréquence = L × 19,2 MHz si le mux du
+  Krait est sur le HFPLL).
+- Tension CX : personne ne la vote, d'où l'AXI limité à 291,75 MHz (palier
+  nominal) au lieu des 400 MHz d'Android.
+- GTK4 en rendu cairo (blocage du GPU avec le moteur « ngl »).
+- Demi-écrans : deux CTL flushés l'un après l'autre (pas de « single
+  flush » sur MDP5 1.2) ; une image peut être mise à jour à moitié si les
+  deux écritures encadrent un vsync.
+- Avertissements « rcg didn't update its configuration » au premier
+  modeset (horloges byte/pixel réglées pendant que la PLL DSI est
+  arrêtée) : bruit, à traiter dans mmcc-msm8974.
+- USB : câble à brancher avant le démarrage (pas de détection VBUS).
+
+## Patches noyau (pmos/linux-lg-d855)
+| # | Objet |
+|---|-------|
+| 0001 | quirk carte MSSD0 |
+| 0002 | pilote panel LGD SIC 1440p dual-DSI, séquences d'Android |
+| 0003 | simpledrm : votes d'interconnect (chemin « bus » borné) |
+| 0004 | mmcc : ne pas garer mdp_clk_src sur XO à l'enregistrement |
+| 0005 | adreno : paramètre headless_gpu |
+| 0006 | MDP5 : split display DSI couplé sans source split (MSM8974) |
+| 0007 | DSI : adresse du second contrôleur MSM8974 (0xfd922e00) |
+| 0008 | LM3697 : réglage OVP du boost |
+| 0009 | DSI : broadcast du DMA de commandes en DSI couplé synchronisé |
+| 0010 | DSI : trace des réponses de lecture invalides (mise au point) |
+| 0011 | DSI : horloge HS continue demandée après l'init du panneau |
+
+DTS : DSI1 `interrupts = <5>` (bug amont : <4>), nœud `fb_panel` factice
+désactivé pour que fw_devlink ne retarde pas simpledrm.
+
+## Câblage (manuel de service)
+Reset panel PM8941 GPIO 19 ; IOVCC = L12 ; TPS65132 ENP GPIO 56 / ENN
+GPIO 100 ; LM3697 enable GPIO 91 ; I2C commun GPIO 83/84 = blsp2_i2c5.
+
+## État du téléphone
+- Carte microSD refaite avec `pmos/install-sdcard.sh` (Phosh, greetd actif).
+- Repli si le démarrage casse : ajouter `module_blacklist=msm` à la ligne
+  `append` de `/boot/extlinux/extlinux.conf`.
+
+## Travail de développement
+- Noyau : arbre de travail avec les patches appliqués, compilé par
+  `make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- <obj> </dev/null`
+  (`</dev/null` évite le blocage sur une question de config).
+- Référence downstream : LineageOS/android_kernel_lge_g3 (noyau LG 3.4) :
+  drivers/video/msm/mdss, drivers/mfd/tps65132.c,
+  drivers/video/backlight/lm3697.c, arch/arm/mach-msm/clock-8974.c et
+  arch/arm/boot/dts/msm8974pro-lge-common/.
+- Plus tard : remettre Phosh avec le GPU, retirer la relecture de debug,
+  proposer en amont les correctifs (adresse et IRQ DSI1, mmcc, OVP LM3697,
+  carte SD lk2nd), périphériques du fork archeYR/lg-d855-mainline.
+
+## Historique du chantier
+
+Notes prises au fil des essais, de la plus ancienne à la plus récente.
+Les paramètres `keep_init`, `init_steps`, `debug_reads`, `test_dcs` et
+`reset_pulse` du pilote panneau n'existent plus depuis r43.
+
+### Ce qui marchait au début du chantier
 - Démarrage autonome : lk2nd patché (carte SD, `tools/build-lk2nd.sh`) →
   extlinux sur pmOS_boot (ext2, table MBR).
 - Mise à jour : `NO_BOOT=1 HOST=<ip wifi> pmos/update.sh`, puis `sudo reboot`.
@@ -15,7 +143,7 @@ pour l'état général ; ce fichier décrit le chantier en cours.
   (VCO 362,8 MHz) identiques au bootloader.
 - Rétroéclairage LM3697 OK avec OVP 24 V (patch 0008, registre 0x1a = 0x02).
 
-## Le problème en cours
+### Le problème d'alors
 Écran noir en affichage natif : rétroéclairage allumé, rémanence de l'ancienne
 console, quelques traits verticaux colorés à gauche. Le panel n'est pas
 initialisé : power mode relu à 0x00 (attendu 0x9c), DSI0 renvoie -61.
@@ -126,41 +254,6 @@ Pistes suivantes si 0x9c n'apparaît pas :
 - vérifier qui déclenche le DMA (DSI1 seul en sync) et le contenu de
   CMD_DMA_CTRL/ CMD_MODE_DMA_CTRL relu en natif (`tools/mdss-snapshot.sh`) ;
 - lire le registre d'erreurs DSI (ACK/timeout) après chaque commande.
-
-## Patches noyau (pmos/linux-lg-d855)
-| # | Objet |
-|---|-------|
-| 0001 | quirk carte MSSD0 |
-| 0002 | pilote panel LGD SIC 1440p dual-DSI (+ relecture power mode) |
-| 0003 | simpledrm : interconnect |
-| 0004 | mmcc : ne pas garer mdp_clk_src sur XO à l'enregistrement |
-| 0005 | adreno : paramètre headless_gpu |
-| 0006 | MDP5 : split display DSI couplé sans source split (MSM8974) |
-| 0007 | DSI : adresse du second contrôleur MSM8974 (0xfd922e00) |
-| 0008 | LM3697 : réglage OVP du boost |
-| 0009 | DSI : broadcast du DMA de commandes en DSI couplé synchronisé |
-
-DTS : DSI1 `interrupts = <5>` (bug amont : <4>), nœud `fb_panel` factice
-désactivé pour que fw_devlink ne retarde pas simpledrm.
-
-## Câblage (manuel de service)
-Reset panel PM8941 GPIO 19 ; IOVCC = L12 ; TPS65132 ENP GPIO 56 / ENN
-GPIO 100 ; LM3697 enable GPIO 91 ; I2C commun GPIO 83/84 = blsp2_i2c5.
-
-## État du téléphone
-- greetd désactivé pour les tests (`sudo systemctl enable greetd` pour le
-  remettre).
-- Repli si le démarrage casse : ajouter `module_blacklist=msm` à la ligne
-  `append` de `/boot/extlinux/extlinux.conf`.
-
-## Travail de développement
-- Noyau : arbre de travail avec les patches appliqués, compilé par
-  `make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- <obj> </dev/null`
-  (`</dev/null` évite le blocage sur une question de config).
-- Référence downstream : drivers/video/msm/mdss et DT LG (noyau LG 3.4).
-- Plus tard : remettre Phosh avec le GPU, retirer la relecture de debug,
-  proposer en amont les correctifs (adresse et IRQ DSI1, mmcc, OVP LM3697,
-  carte SD lk2nd), périphériques du fork archeYR/lg-d855-mainline.
 
 pkgrel 33 : default-brightness-level 1600 (choisi à l'œil, mappage
 exponentiel). Phosh lancé à la main par greetd sur l'affichage natif avec

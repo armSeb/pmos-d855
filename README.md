@@ -25,9 +25,9 @@ lieu de l'ancien noyau downstream 3.4, et à terme **Phosh**.
 Le squelette compile proprement contre le fork 6.16 (aucun avertissement
 propre au fichier).
 
-Testé sur le matériel : lk2nd bumpé flashé dans `boot` par
-`tools/flash-lk2nd.sh` (méthode fastboot depuis l'aboot LG) démarre
-directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
+Testé sur le matériel : démarrage autonome par lk2nd, Phosh en affichage
+natif avec le GPU. Le chantier en cours (extinction et rallumage de l'écran,
+performances) est suivi dans [docs/REPRISE.md](docs/REPRISE.md).
 
 | Bloc | Composant | Dans le DTS | Driver mainline |
 |---|---|---|---|
@@ -39,10 +39,11 @@ directement en mode fastboot. Le noyau mainline n'a pas encore été démarré.
 | Jauge | MAX17048 @ 0x36, IRQ TLMM 9 | activé | oui (`max17040_battery`) |
 | Tactile | Synaptics S3528 @ blsp1_i2c2 0x20, IRQ TLMM 73, reset TLMM 8 | activé, **testé** | oui (RMI4) |
 | WiFi | WCNSS Pronto + iris WCN3680 (interne au SoC) | **testé** ✓ | oui (`wcn36xx`, firmware via `extract-firmware`) |
-| Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | désactivé | oui (`leds-lm3697`) |
-| Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | désactivé | oui |
-| Panel | LGD SIC 1440p, vidéo, **double DSI** | décrit, désactivé | driver écrit (patch 0002) ; **MDP5 ne gère pas le DSI couplé** |
-| GPU | Adreno 330 | **testé** ✓ en rendu seul (FD330, GLES 3.0) ; pas encore d'affichage natif | oui (freedreno, `msm.headless_gpu`) |
+| Rétroéclairage | LM3697 @ blsp2_i2c5 0x36, HWEN TLMM 91 | activé, **testé** ✓ (mappage linéaire, courbe de luminosité d'Android) | oui (`leds-lm3697`, patch 0008) |
+| Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | activé, ±5,0 V comme le pilote LG | oui |
+| Panel | LGD SIC 1440p, vidéo, **double DSI** | activé, **affichage natif testé** ✓ ; extinction/rallumage à valider (pkgrel 43) | patch 0002 ; MDP5 en « split display » (0006), DSI (0007, 0009, 0011) |
+| GPU | Adreno 330 | **testé** ✓ sous Phosh (FD330, GLES 3.0) ; fréquences d'Android (578 MHz) et bus multimédia à valider (pkgrel 43) | oui (freedreno) |
+| CPU | 4 × Krait 400 | **pas de changement de fréquence** : ni HFPLL ni kraitcc dans le dtsi amont, les cœurs restent à la fréquence laissée par le bootloader | à faire |
 | Bluetooth | WCNSS (même puce que le WiFi) | activé | oui (`btqcomsmd`, firmware requis) |
 | Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
 | Audio, capteurs, caméra, NFC | | absents | |
@@ -201,23 +202,25 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
 ## Feuille de route
 
 0. lk2nd bumpé démarre. ✓
-1. Boot console : eMMC, microSD, USB réseau, boutons. ← **on en est là**
+1. Boot console : eMMC, microSD, USB réseau, boutons. ✓
 2. Affichage via le framebuffer laissé par le bootloader (simple-framebuffer +
    simpledrm) : 1440x2560 RGB888 à `0x03200000`, stride 4320 (relevé avec
    `mdp-dump`). Deux pièges trouvés : `mmcc-msm8974` garait l'horloge du MDP
    (`mdp_clk_src`) sur XO à son probe et cassait l'affichage dans la première
    seconde (trouvé par trace regmap avec `mmcc-trace`, patch 0004), et
-   le bus multimédia (MMSS NoC) doit rester tel que le bootloader l'a réglé
-   (driver désactivé, vote BIMC par simpledrm, patch 0003). ← **on en est là**
+   le bus multimédia (MMSS NoC) ne doit jamais descendre sous ce que le
+   bootloader a réglé (votes de simpledrm, patch 0003). ✓
 3. Affichage natif : MDP5 en « split display » (patch 0006), programmé comme
    le bootloader (relevé `mdss-snapshot`) : CTL0/LM0/INTF1 + CTL1/LM1/INTF2,
    INTF2 synchronisé sur INTF1 (`SPLIT_DPL`), deux pipes par plan. Panneau
-   (patch 0002), TPS65132 et LM3697 activés. ← **en test**
+   (patch 0002), TPS65132 et LM3697 activés. ✓ L'horloge HS du DSI n'est
+   demandée qu'après l'init du panneau, comme LG (patch 0011).
+   ← **extinction/rallumage de l'écran en test**
    Retour arrière sans recompiler : ajouter `module_blacklist=msm` à la ligne
    `append` de `/boot/extlinux/extlinux.conf` (console simpledrm).
-4. GPU : Adreno 330 en rendu seul (patch 0005, `msm.headless_gpu=1`,
-   sans IOMMU : `allow_vram_carveout`), puis affichage natif pour l'accélération
-   réelle. Phosh fonctionne déjà en rendu logiciel.
+4. GPU : Adreno 330 sous Phosh (sans IOMMU : `allow_vram_carveout`). ✓
+   Fréquences d'Android et bus multimédia à 291,75 MHz. ← **en test**
+   Reste le plus gros écart avec Android : le changement de fréquence du CPU.
 5. WiFi, batterie, Bluetooth.
 6. Modem (MSS + rmtfs + ModemManager), puis audio.
 7. Upstream du DTS dans le fork msm8974-mainline puis dans Linux (ajouter son `Signed-off-by` avant l'envoi).
@@ -232,7 +235,7 @@ Manuel de service LG D855 (V1.0, juillet 2014, schémas pages 216, 224 et
 | MIPI0 / MIPI1 | deux liens DSI 4 voies vers le panneau 5,5" QHD | `mdss_dsi0` + `mdss_dsi1` couplés |
 | `LCD_RESET_N` | PM8941 GPIO 19 | `panel_reset_pin` |
 | IOVCC panneau | `+1V8_VREG_L12` (modif « REVB_0206 » ; L10 sur le schéma bloc, plus ancien) | `pm8941_l12` |
-| VSP/VSN ±5,5 V | TPS65132 (`DSV_ENP` GPIO 56, `DSV_ENN` GPIO 100), I2C commun | `tps65132@3e` |
+| VSP/VSN (« ±5V5 » sur le schéma, ±5,0 V programmés par LG) | TPS65132 (`DSV_ENP` GPIO 56, `DSV_ENN` GPIO 100), I2C commun | `tps65132@3e` |
 | Rétroéclairage | LM3697 (`LCD_BL_EN` GPIO 91, `LCD_PWM` depuis le panneau), I2C commun | `lm3697@36` |
 | I2C commun | GPIO 83/84 (BLSP11) | `blsp2_i2c5` |
 | TE / VSYNC | GPIO 12 (inutile en mode vidéo) | — |
