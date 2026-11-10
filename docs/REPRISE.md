@@ -55,6 +55,12 @@ SAW L2 = 0 (le SAW n'a jamais envoyé de consigne : la consigne de 1,1 V à
 l'enregistrement est bien nécessaire). CPU0 : gate ctl 0x403f3f7f, mode 0
 → BHS. Krait 0x512f06f1 (variant 2, révision 1) : pas de 1,15 V imposé.
 
+Premier démarrage de r44 : régulateur à 1,1 V, krait-cc lit L2 à
+729,6 MHz et CPU0 à 960 MHz (fréquences du bootloader), CPU1-3 « Undefined
+rate » forcés à 384 MHz. qcom-cpufreq-nvmem ne s'est pas chargé (module
+déclaré pour la racine du DT, sans événement udev) : cœurs figés, téléphone
+plus lent. device-lg-d855 r23 le charge par modules-load.d.
+
 Puis avec r44 :
 ```
 dmesg | grep -i -E "krait|hfpll|L2 @|CPU[0-3] @|saw|cpufreq|speed bin|pvs|power gate|cooling"
