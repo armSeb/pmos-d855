@@ -4,7 +4,7 @@
 # Démarrage : lk2nd → boot.img (zImage + DTB appendé, généré par mkinitfs).
 pkgname=linux-lg-d855
 pkgver=6.16.12
-pkgrel=42
+pkgrel=43
 pkgdesc="LG G3 (D855) mainline kernel"
 arch="armv7"
 _carch="arm"
@@ -50,6 +50,7 @@ source="
 	0008-leds-lm3697-add-boost-over-voltage-protection-setti.patch
 	0009-drm-msm-dsi-broadcast-command-DMA-for-synchronized-b.patch
 	0010-drm-msm-dsi-log-raw-invalid-read-responses.patch
+	0011-drm-msm-dsi-request-the-continuous-HS-clock-after-th.patch
 	"
 builddir="$srcdir/linux-$_commit"
 

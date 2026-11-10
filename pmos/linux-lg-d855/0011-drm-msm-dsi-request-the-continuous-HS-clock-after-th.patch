@@ -1,0 +1,187 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] drm/msm/dsi: request the continuous HS clock after the panel init
+
+For a peripheral that wants a continuous clock, the host forces the clock
+lane to HS as soon as it is powered on, that is before the panel driver
+powers up, resets and initializes the panel (prepare_prev_first). The
+downstream driver does it the other way round: the link comes up with
+every lane, clock included, in LP-11, the panel is reset and takes its
+init commands in LP mode, and only then is the clock lane forced to HS,
+right before the video stream starts. The LG variant of the downstream
+driver, for the dual DSI LGD panel of the LG G3, even moved the request
+after the "on" commands, and releases it right after the "off" commands.
+
+That panel shows what is at stake: initialized by the bootloader, it
+keeps displaying when msm takes the running link over, but once it has
+been powered down or reset it never shows the stream again if the HS
+clock is already running when it comes back: it has no LP-11 to HS
+transition of the clock lane to lock on.
+
+When a video mode peripheral takes its commands in LP mode
+(MIPI_DSI_MODE_LPM), keep the clock lane in LP-11 at power-on and request
+the continuous HS clock from the bridge .enable, once the panel has been
+prepared and the stream starts; release it from .disable, after the
+panel has taken its off commands. In bonded mode the slave link goes
+first, as downstream.
+
+msm.dsi_early_hs_clk=1 gives the former behaviour back.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/gpu/drm/msm/dsi/dsi.h b/drivers/gpu/drm/msm/dsi/dsi.h
+index fd5e30661..f5b2d609d 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi.h
++++ b/drivers/gpu/drm/msm/dsi/dsi.h
+@@ -69,6 +69,7 @@ int msm_dsi_host_cmd_rx(struct mipi_dsi_host *host,
+ void msm_dsi_host_cmd_xfer_commit(struct mipi_dsi_host *host,
+ 					u32 dma_base, u32 len);
+ int msm_dsi_host_enable(struct mipi_dsi_host *host);
++void msm_dsi_host_request_hs_clk(struct mipi_dsi_host *host, bool enable);
+ int msm_dsi_host_disable(struct mipi_dsi_host *host);
+ void msm_dsi_host_enable_irq(struct mipi_dsi_host *host);
+ void msm_dsi_host_disable_irq(struct mipi_dsi_host *host);
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+index e29a8614f..256939cff 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -716,6 +716,34 @@ bool msm_dsi_host_is_wide_bus_enabled(struct mipi_dsi_host *host)
+ 		 msm_host->cfg_hnd->minor >= MSM_DSI_6G_VER_MINOR_V2_5_0);
+ }
+ 
++/*
++ * The downstream driver brings the link up with its clock lane in LP-11,
++ * lets the panel driver power up, reset and initialize the panel in LP mode,
++ * and only then forces the clock lane to HS, right before the video stream
++ * starts. Some panels (the dual DSI LGD panel of the LG G3, for one) never
++ * show the stream if they are reset or initialized while the HS clock is
++ * already running: they miss the LP-11 to HS transition of the clock lane.
++ *
++ * Do the same when the peripheral takes its commands in LP mode. Set
++ * dsi_early_hs_clk to request the HS clock as soon as the host is powered,
++ * as before.
++ */
++static bool dsi_early_hs_clk;
++module_param(dsi_early_hs_clk, bool, 0600);
++MODULE_PARM_DESC(dsi_early_hs_clk,
++		 "Request the continuous HS clock at DSI host power-on, before the panel is initialized");
++
++static bool dsi_host_hs_clk_is_deferred(struct msm_dsi_host *msm_host)
++{
++	unsigned long flags = msm_host->mode_flags;
++
++	if (dsi_early_hs_clk)
++		return false;
++
++	return (flags & MIPI_DSI_MODE_VIDEO) && (flags & MIPI_DSI_MODE_LPM) &&
++	       !(flags & MIPI_DSI_CLOCK_NON_CONTINUOUS);
++}
++
+ static void dsi_ctrl_enable(struct msm_dsi_host *msm_host,
+ 			struct msm_dsi_phy_shared_timings *phy_shared_timings, struct msm_dsi_phy *phy)
+ {
+@@ -826,8 +854,18 @@ static void dsi_ctrl_enable(struct msm_dsi_host *msm_host,
+ 		if (msm_dsi_phy_set_continuous_clock(phy, true))
+ 			lane_ctrl &= ~DSI_LANE_CTRL_HS_REQ_SEL_PHY;
+ 
+-		dsi_write(msm_host, REG_DSI_LANE_CTRL,
+-			lane_ctrl | DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST);
++		/*
++		 * A video mode peripheral initialized in LP mode is powered
++		 * up, reset and configured with every lane, clock included,
++		 * in LP-11: the continuous HS clock is only requested once
++		 * that is done, see msm_dsi_host_request_hs_clk().
++		 */
++		if (dsi_host_hs_clk_is_deferred(msm_host))
++			lane_ctrl &= ~DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST;
++		else
++			lane_ctrl |= DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST;
++
++		dsi_write(msm_host, REG_DSI_LANE_CTRL, lane_ctrl);
+ 	}
+ 
+ 	data |= DSI_CTRL_ENABLE;
+@@ -2322,6 +2360,27 @@ void msm_dsi_host_disable_irq(struct mipi_dsi_host *host)
+ 	disable_irq(msm_host->irq);
+ }
+ 
++/*
++ * Request (or release) the continuous HS clock of a host that deferred it
++ * at power-on. Called once the peripheral is initialized and the video
++ * stream starts, and before it stops.
++ */
++void msm_dsi_host_request_hs_clk(struct mipi_dsi_host *host, bool enable)
++{
++	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
++	u32 lane_ctrl;
++
++	if (!msm_host->power_on || !dsi_host_hs_clk_is_deferred(msm_host))
++		return;
++
++	lane_ctrl = dsi_read(msm_host, REG_DSI_LANE_CTRL);
++	if (enable)
++		lane_ctrl |= DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST;
++	else
++		lane_ctrl &= ~DSI_LANE_CTRL_CLKLN_HS_FORCE_REQUEST;
++	dsi_write(msm_host, REG_DSI_LANE_CTRL, lane_ctrl);
++}
++
+ int msm_dsi_host_enable(struct mipi_dsi_host *host)
+ {
+ 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index 3ab18fb1a..b5aa626e3 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -342,6 +342,43 @@ void msm_dsi_manager_tpg_enable(void)
+ 	}
+ }
+ 
++/*
++ * Continuous HS clock of hosts that kept their clock lane in LP-11 while
++ * the panel was initialized (see msm_dsi_host_request_hs_clk()).
++ *
++ * The bridge is enabled right after the encoder: the panel has had its init
++ * commands and the video stream is starting. It is disabled right before
++ * the encoder, after the panel has taken its off commands. As downstream,
++ * the slave link of a bonded pair goes first.
++ */
++static void dsi_mgr_bridge_request_hs_clk(struct drm_bridge *bridge,
++					  bool enable)
++{
++	int id = dsi_mgr_bridge_get_id(bridge);
++	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
++	struct msm_dsi *other_dsi = dsi_mgr_get_other_dsi(id);
++	bool is_bonded_dsi = IS_BONDED_DSI();
++
++	/* Do nothing with the host if it is slave-DSI in case of bonded DSI */
++	if (is_bonded_dsi && !IS_MASTER_DSI_LINK(id))
++		return;
++
++	if (is_bonded_dsi && other_dsi)
++		msm_dsi_host_request_hs_clk(other_dsi->host, enable);
++
++	msm_dsi_host_request_hs_clk(msm_dsi->host, enable);
++}
++
++static void dsi_mgr_bridge_enable(struct drm_bridge *bridge)
++{
++	dsi_mgr_bridge_request_hs_clk(bridge, true);
++}
++
++static void dsi_mgr_bridge_disable(struct drm_bridge *bridge)
++{
++	dsi_mgr_bridge_request_hs_clk(bridge, false);
++}
++
+ static void dsi_mgr_bridge_post_disable(struct drm_bridge *bridge)
+ {
+ 	int id = dsi_mgr_bridge_get_id(bridge);
+@@ -458,6 +495,8 @@ static int dsi_mgr_bridge_attach(struct drm_bridge *bridge,
+ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
+ 	.attach = dsi_mgr_bridge_attach,
+ 	.pre_enable = dsi_mgr_bridge_pre_enable,
++	.enable = dsi_mgr_bridge_enable,
++	.disable = dsi_mgr_bridge_disable,
+ 	.post_disable = dsi_mgr_bridge_post_disable,
+ 	.mode_set = dsi_mgr_bridge_mode_set,
+ 	.mode_valid = dsi_mgr_bridge_mode_valid,

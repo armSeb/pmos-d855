@@ -5,15 +5,27 @@ Subject: [PATCH] drm/panel: add LG G3 LGD SIC 1440p dual DSI video panel
 
 Panel driver for the 1440x2560 LGD "SIC" video mode panel of the LG G3
 (D855), driven over two DSI links (720x2560 each, 4 lanes). Init and off
-sequences, timings and power-up order come from the vendor device tree
-(msm8974pro-lge-panel.dtsi). Supplies: vdd (1.8 V), vsp/vsn (TPS65132).
+sequences and timings come from the vendor device tree
+(msm8974pro-lge-panel.dtsi), power sequencing from the vendor driver
+(mdss_dsi.c, mdss_dsi_panel.c). Supplies: vdd (1.8 V), vsp/vsn (TPS65132,
++/-5.0 V).
+
+Like the vendor driver:
+- the panel the bootloader left running is taken over as it is
+  (continuous splash), without reset nor init sequence;
+- the off sequence is sent from .disable, while the video stream still
+  runs (once the MDP interface has stopped, the DSI video engine no
+  longer leaves room for commands);
+- VSP/VSN are cut and reset asserted while the screen is off;
+- the init sequence starts with a DCS soft reset: the reset line alone
+  does not bring the panel back.
 
 Signed-off-by: armSeb <armSeb@users.noreply.github.com>
 ---
  .../gpu/drm/panel/msm8974-generated/Kconfig   |   8 +
  .../gpu/drm/panel/msm8974-generated/Makefile  |   1 +
- .../msm8974-generated/panel-lge-g3-lgd-sic.c  | 369 ++++++++++++++++++
- 3 files changed, 378 insertions(+)
+ .../msm8974-generated/panel-lge-g3-lgd-sic.c  | 567 ++++++++++++++++++
+ 3 files changed, 576 insertions(+)
  create mode 100644 drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
 
 diff --git a/drivers/gpu/drm/panel/msm8974-generated/Kconfig b/drivers/gpu/drm/panel/msm8974-generated/Kconfig
@@ -47,14 +59,15 @@ new file mode 100644
 index 000000000..769649da0
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/msm8974-generated/panel-lge-g3-lgd-sic.c
-@@ -0,0 +1,608 @@
+@@ -0,0 +1,567 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * LG G3 (D855) 1440x2560 LGD "SIC" video mode panel, driven over two DSI
 + * links (left half on DSI0, right half on DSI1, 720x2560 each).
 + *
-+ * Init/off sequences, timings and power-up order taken from the vendor
-+ * device tree (msm8974pro-lge-panel.dtsi, LineageOS android_kernel_lge_g3):
++ * Init/off sequences and timings taken from the vendor device tree
++ * (msm8974pro-lge-panel.dtsi), power sequencing from the vendor driver
++ * (mdss_dsi.c, mdss_dsi_panel.c), LineageOS android_kernel_lge_g3:
 + *   Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 + * Structure follows the linux-mdss-dsi-panel-driver-generator output and
 + * the dual DSI handling of panel-novatek-nt35950.c.
@@ -76,18 +89,25 @@ index 000000000..769649da0
 +#include <video/mipi_display.h>
 +
 +static const char * const lgd_sic_supply_names[] = {
-+	"vdd",	/* PM8941 L10, 1.8 V (downstream "vdd") */
-+	"vsp",	/* TPS65132 positive output (+5.5 V) */
-+	"vsn",	/* TPS65132 negative output (-5.5 V) */
++	"vdd",	/* panel I/O supply, 1.8 V */
++	"vsp",	/* TPS65132 positive output, +5.0 V */
++	"vsn",	/* TPS65132 negative output, -5.0 V */
 +};
++
++/* The vendor driver runs VSP/VSN at +/-5.0 V (TPS65132 code 0x0a) */
++#define LGD_SIC_DSV_UV		5000000
 +
 +struct lgd_sic {
 +	struct drm_panel panel;
 +	struct mipi_dsi_device *dsi[2];
 +	struct regulator_bulk_data supplies[ARRAY_SIZE(lgd_sic_supply_names)];
 +	struct gpio_desc *reset_gpio;
-+	bool dsv_cycled;
-+	bool rails_on;
++	/* panel left powered and initialized by the bootloader */
++	bool splash;
++	/* VDD and VSP/VSN are on */
++	bool powered;
++	/* the panel got its init sequence and is out of sleep */
++	bool initialized;
 +};
 +
 +static inline struct lgd_sic *to_lgd_sic(struct drm_panel *panel)
@@ -96,84 +116,23 @@ index 000000000..769649da0
 +}
 +
 +/*
-+ * Bring-up aid: keep the panel as the bootloader left it (powered, out of
-+ * reset, initialized) on the first prepare, without resetting it or sending
-+ * the init sequence. Tells a video-path problem from a panel-init problem.
++ * Bring-up knobs. The defaults follow the vendor (Android) driver:
++ * - display off + sleep in while the video stream is still running;
++ * - VSP/VSN cut and reset asserted while the screen is off;
++ * - DCS soft reset at the head of the init sequence.
 + */
-+static bool debug_reads;
-+module_param(debug_reads, bool, 0644);
-+MODULE_PARM_DESC(debug_reads, "read back DCS registers around the init sequence");
++static bool keep_power;
++module_param(keep_power, bool, 0644);
++MODULE_PARM_DESC(keep_power,
++		 "keep VSP/VSN on while the screen is off (sleep in only)");
 +
-+static bool keep_init;
-+module_param(keep_init, bool, 0644);
-+MODULE_PARM_DESC(keep_init, "keep the bootloader panel state on first prepare");
++static bool soft_reset = true;
++module_param(soft_reset, bool, 0644);
++MODULE_PARM_DESC(soft_reset, "start the init sequence with a DCS soft reset");
 +
-+/*
-+ * Bring-up aid: which parts of the power-up sequence prepare() runs, to
-+ * bisect the panel init. keep_init=1 is init_steps=0 for the first prepare.
-+ * The DSV power cycle leaves the panel black: off by default (14).
-+ */
-+#define LGD_SIC_STEP_DSV_CYCLE	BIT(0)	/* switch VSP/VSN off and on once */
-+#define LGD_SIC_STEP_RESET	BIT(1)	/* hold reset during power-up */
-+#define LGD_SIC_STEP_TABLE	BIT(2)	/* vendor register table */
-+#define LGD_SIC_STEP_ON		BIT(3)	/* sleep out + display on */
-+#define LGD_SIC_STEP_HS		BIT(4)	/* send the commands in HS mode */
-+#define LGD_SIC_STEP_SOFT_RESET	BIT(5)	/* DCS soft reset (0x01), 120 ms */
-+#define LGD_SIC_STEP_SLEEP_CYCLE BIT(6)	/* display off + sleep in, 120 ms */
-+#define LGD_SIC_STEPS_DEFAULT	(LGD_SIC_STEP_RESET | LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON)
-+
-+static unsigned int init_steps = LGD_SIC_STEPS_DEFAULT;
-+
-+/*
-+ * The DCS off commands time out in synchronized bonded mode: msm waits for
-+ * a DSI1 "video done" that never comes while video is still running, and
-+ * aborts the command DMA (-110). The reset that follows turns the panel off
-+ * anyway, so they are skipped by default.
-+ */
-+static bool send_off;
++static bool send_off = true;
 +module_param(send_off, bool, 0644);
-+MODULE_PARM_DESC(send_off, "send display off/sleep in before reset on unprepare");
-+
-+/*
-+ * Bring-up aids, to check that the reset line and the DCS commands really
-+ * reach the panel:
-+ * - test_dcs: DCS command without parameter sent at the end of every
-+ *   prepare, e.g. 0x21 (enter invert mode, colours visibly inverted);
-+ * - reset_pulse: writing N holds the reset asserted for N ms, at once,
-+ *   while the panel is showing an image (a working reset blanks it).
-+ */
-+static unsigned int test_dcs;
-+module_param(test_dcs, uint, 0644);
-+MODULE_PARM_DESC(test_dcs, "DCS command (no parameter) sent at the end of prepare, 0 = none");
-+
-+static struct lgd_sic *lgd_sic_dev;
-+
-+static int lgd_sic_reset_pulse_set(const char *val, const struct kernel_param *kp)
-+{
-+	unsigned int ms;
-+	int ret;
-+
-+	ret = kstrtouint(val, 0, &ms);
-+	if (ret)
-+		return ret;
-+	if (!lgd_sic_dev || !ms || ms > 1000)
-+		return -EINVAL;
-+
-+	dev_info(&lgd_sic_dev->dsi[0]->dev, "reset pulse: %u ms\n", ms);
-+	gpiod_set_value_cansleep(lgd_sic_dev->reset_gpio, 1);
-+	msleep(ms);
-+	gpiod_set_value_cansleep(lgd_sic_dev->reset_gpio, 0);
-+	return 0;
-+}
-+
-+static const struct kernel_param_ops lgd_sic_reset_pulse_ops = {
-+	.set = lgd_sic_reset_pulse_set,
-+};
-+module_param_cb(reset_pulse, &lgd_sic_reset_pulse_ops, NULL, 0200);
-+MODULE_PARM_DESC(reset_pulse, "write N: assert the panel reset for N ms (test)");
-+module_param(init_steps, uint, 0644);
-+MODULE_PARM_DESC(init_steps,
-+		 "power-up steps: 1 DSV cycle, 2 reset, 4 table, 8 sleep out/display on, 16 HS commands, 32 DCS soft reset, 64 sleep in first (default 14)");
++MODULE_PARM_DESC(send_off, "send display off/sleep in when the screen goes off");
 +
 +/*
 + * Downstream uses "broadcast mode": the same commands go to both links.
@@ -243,71 +202,65 @@ index 000000000..769649da0
 +				     0x00, 0x00, 0x00, 0x00);
 +}
 +
-+static int lgd_sic_on(struct lgd_sic *ctx, unsigned int steps)
++/*
++ * Vendor "on" sequence (qcom,mdss-dsi-on-command, sent in LP mode): soft
++ * reset, register table, sleep out, display on, with 5 ms after the soft
++ * reset and after sleep out. The reset line alone does not bring the panel
++ * back once it has lost its video stream or its VSP/VSN rails: sleep out is
++ * a no-op for a controller that still believes it is awake, so the soft
++ * reset matters.
++ *
++ * The vendor driver sends this with every DSI lane, clock included, in
++ * LP-11, and only then requests the continuous HS clock: the MSM DSI host
++ * does the same for LP-mode peripherals (it starts the HS clock when the
++ * video stream starts).
++ */
++static int lgd_sic_on(struct lgd_sic *ctx)
 +{
 +	struct mipi_dsi_multi_context dsi_ctx = { };
 +	int i;
 +
-+	if (steps & LGD_SIC_STEP_HS)
-+		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++)
-+			ctx->dsi[i]->mode_flags &= ~MIPI_DSI_MODE_LPM;
-+
-+	/*
-+	 * The reset line (PM8941 GPIO 19) has no visible effect on this
-+	 * panel, so it cannot be relied on to bring it back to a known
-+	 * state: do it with DCS commands instead, before the init.
-+	 */
-+	if (steps & LGD_SIC_STEP_SLEEP_CYCLE) {
-+		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+			dsi_ctx.dsi = ctx->dsi[i];
-+			mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
-+			mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
-+		}
-+		mipi_dsi_msleep(&dsi_ctx, 120);
-+	}
-+
-+	if (steps & LGD_SIC_STEP_SOFT_RESET) {
++	if (soft_reset) {
 +		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
 +			dsi_ctx.dsi = ctx->dsi[i];
 +			mipi_dsi_dcs_soft_reset_multi(&dsi_ctx);
 +		}
-+		mipi_dsi_msleep(&dsi_ctx, 120);
++		mipi_dsi_usleep_range(&dsi_ctx, 5000, 6000);
 +	}
 +
-+	if (steps & LGD_SIC_STEP_TABLE) {
-+		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+			dsi_ctx.dsi = ctx->dsi[i];
-+			lgd_sic_on_link(&dsi_ctx);
-+		}
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		lgd_sic_on_link(&dsi_ctx);
 +	}
 +
-+	if (steps & LGD_SIC_STEP_ON) {
-+		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+			dsi_ctx.dsi = ctx->dsi[i];
-+			mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
-+		}
-+		mipi_dsi_msleep(&dsi_ctx, 120);
-+
-+		for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+			dsi_ctx.dsi = ctx->dsi[i];
-+			mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
-+		}
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
 +	}
++	mipi_dsi_usleep_range(&dsi_ctx, 5000, 6000);
 +
-+	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++)
-+		ctx->dsi[i]->mode_flags |= MIPI_DSI_MODE_LPM;
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
++		dsi_ctx.dsi = ctx->dsi[i];
++		mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
++	}
 +
 +	return dsi_ctx.accum_err;
 +}
 +
++/*
++ * Vendor "off" sequence (qcom,mdss-dsi-off-command, sent in HS mode while
++ * the video stream is still running): display off, 20 ms, sleep in, 80 ms.
++ */
 +static int lgd_sic_off(struct lgd_sic *ctx)
 +{
 +	struct mipi_dsi_multi_context dsi_ctx = { };
 +	int i;
 +
++	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++)
++		ctx->dsi[i]->mode_flags &= ~MIPI_DSI_MODE_LPM;
++
 +	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
 +		dsi_ctx.dsi = ctx->dsi[i];
-+		ctx->dsi[i]->mode_flags &= ~MIPI_DSI_MODE_LPM;
 +		mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
 +	}
 +	mipi_dsi_msleep(&dsi_ctx, 20);
@@ -325,193 +278,189 @@ index 000000000..769649da0
 +}
 +
 +/*
-+ * Bring-up aid: read back the DCS power mode (expected 0x9c: booster on,
-+ * sleep out, normal mode, display on). In synchronized bonded mode msm only
-+ * triggers transfers from the second link, so read through it.
++ * One TPS65132 output, as the vendor driver switches it on: enable pin
++ * high for 1 ms, low for 5 ms, high again, then the output voltage is
++ * written back over I2C (the regulator may come up at its EEPROM default).
 + */
-+static void lgd_sic_dump_power_mode(struct lgd_sic *ctx, const char *when)
++static int lgd_sic_dsv_enable(struct regulator *dsv)
 +{
-+	/*
-+	 * 0x0a power mode, 0x0b address mode, 0x0c pixel format, 0x0e signal
-+	 * mode, 0x52/0x54 brightness/control (written 0xff/0x2c by the init
-+	 * sequence), 0xda-0xdc ID. Shows whether writes reach the panel.
-+	 */
-+	static const u8 regs[] = { 0x0a, 0x0b, 0x0c, 0x0e, 0x52, 0x54,
-+				   0xda, 0xdb, 0xdc };
-+	char buf[160];
-+	int i, l, n, ret;
-+	u8 val;
++	int ret;
 +
-+	if (!debug_reads)
-+		return;
++	ret = regulator_enable(dsv);
++	if (ret < 0)
++		return ret;
++	usleep_range(1000, 1500);
++	regulator_disable(dsv);
++	usleep_range(5000, 6000);
 +
-+	for (l = 0; l < ARRAY_SIZE(ctx->dsi); l++) {
-+		n = 0;
-+		for (i = 0; i < ARRAY_SIZE(regs); i++) {
-+			val = 0;
-+			ret = mipi_dsi_dcs_read(ctx->dsi[l], regs[i], &val, 1);
-+			if (ret == 1)
-+				n += scnprintf(buf + n, sizeof(buf) - n,
-+					       " %02x=%02x", regs[i], val);
-+			else
-+				n += scnprintf(buf + n, sizeof(buf) - n,
-+					       " %02x:err%d", regs[i], ret);
-+		}
-+		dev_info(&ctx->dsi[l]->dev, "DSI%d %s:%s\n", l, when, buf);
-+	}
++	ret = regulator_enable(dsv);
++	if (ret < 0)
++		return ret;
++	usleep_range(500, 1000);
++	regulator_sync_voltage(dsv);
++
++	return 0;
 +}
 +
-+static void lgd_sic_send_test_dcs(struct lgd_sic *ctx)
++/*
++ * Vendor power-up (mdss_dsi_on() + mdss_dsi_panel_reset(1), LG variant):
++ * the DSI link is already up with its lanes in LP-11 (prepare_prev_first);
++ * 10 ms, VSP, 5 ms, reset released, 5 ms, VSN.
++ */
++static int lgd_sic_power_on(struct lgd_sic *ctx)
 +{
-+	struct mipi_dsi_multi_context dsi_ctx = { };
-+	u8 cmd = test_dcs;
-+	int i;
-+
-+	if (!test_dcs || test_dcs > 0xff)
-+		return;
-+
-+	for (i = 0; i < ARRAY_SIZE(ctx->dsi); i++) {
-+		dsi_ctx.dsi = ctx->dsi[i];
-+		mipi_dsi_dcs_write_buffer_multi(&dsi_ctx, &cmd, 1);
-+	}
-+	dev_info(&ctx->dsi[0]->dev, "test DCS %#04x sent: %d\n", cmd,
-+		 dsi_ctx.accum_err);
-+}
-+
-+static int lgd_sic_prepare(struct drm_panel *panel)
-+{
-+	struct lgd_sic *ctx = to_lgd_sic(panel);
 +	struct device *dev = &ctx->dsi[0]->dev;
 +	struct regulator *vdd = ctx->supplies[0].consumer;
 +	struct regulator *vsp = ctx->supplies[1].consumer;
 +	struct regulator *vsn = ctx->supplies[2].consumer;
-+	unsigned int steps = init_steps;
 +	int ret;
-+
-+	if (keep_init) {
-+		keep_init = false;
-+		steps = 0;
-+		dev_info(dev, "keeping the bootloader panel state\n");
-+	}
-+	dev_info(dev, "power-up steps %#x\n", steps);
-+
-+	/* Hold the panel in reset while its rails come up. */
-+	if (steps & LGD_SIC_STEP_RESET)
-+		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+
-+	/*
-+	 * Rails already up (screen unblank): unprepare keeps them on, since
-+	 * the panel does not come back from a VSP/VSN power cycle. Reset,
-+	 * table and sleep out/display on are enough.
-+	 */
-+	if (ctx->rails_on)
-+		goto rails_up;
 +
 +	ret = regulator_enable(vdd);
 +	if (ret < 0) {
 +		dev_err(dev, "Failed to enable vdd: %d\n", ret);
 +		return ret;
 +	}
++	msleep(10);
 +
-+	/*
-+	 * The bootloader leaves the DSV (TPS65132) outputs on, but the
-+	 * regulator framework starts with them "off": switch them on and off
-+	 * once so the panel gets a real power cycle the first time.
-+	 */
-+	if ((steps & LGD_SIC_STEP_DSV_CYCLE) && !ctx->dsv_cycled) {
-+		if (!regulator_enable(vsn))
-+			regulator_disable(vsn);
-+		if (!regulator_enable(vsp))
-+			regulator_disable(vsp);
-+		msleep(20);
-+	}
-+	ctx->dsv_cycled = true;
-+
-+	/*
-+	 * Vendor order (mdss_dsi_panel_reset, LG): VSP, 5 ms, reset released
-+	 * (rst-seq <1 5>), then VSN; output voltages reprogrammed after each
-+	 * enable since the TPS65132 may lose them while disabled. With the
-+	 * rails already up (bootloader), the enables change nothing.
-+	 */
-+	ret = regulator_enable(vsp);
-+	if (ret < 0)
++	ret = lgd_sic_dsv_enable(vsp);
++	if (ret < 0) {
++		dev_err(dev, "Failed to enable vsp: %d\n", ret);
 +		goto err_vdd;
-+	usleep_range(500, 1000);
-+	regulator_sync_voltage(vsp);
++	}
 +	usleep_range(5000, 6000);
 +
-+	if (steps & LGD_SIC_STEP_RESET) {
-+		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-+		usleep_range(5000, 6000);
-+	}
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(5000, 6000);
 +
-+	ret = regulator_enable(vsn);
-+	if (ret < 0)
-+		goto err_vsp;
-+	usleep_range(500, 1000);
-+	regulator_sync_voltage(vsn);
-+	usleep_range(10000, 11000);
-+	ctx->rails_on = true;
-+
-+rails_up:
-+	if (ctx->rails_on && (steps & LGD_SIC_STEP_RESET) &&
-+	    gpiod_get_value_cansleep(ctx->reset_gpio)) {
-+		/*
-+		 * Screen unblank: reset held since unprepare. At boot the panel
-+		 * gets 5 ms after reset, then the VSN enable and 10 ms more
-+		 * before the first command; give it at least as long here
-+		 * (5 ms alone leaves it black, a fading ghost on screen).
-+		 */
-+		usleep_range(10000, 11000);
-+		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
-+		msleep(20);
-+	}
-+
-+	if (!(steps & (LGD_SIC_STEP_TABLE | LGD_SIC_STEP_ON))) {
-+		lgd_sic_send_test_dcs(ctx);
-+		lgd_sic_dump_power_mode(ctx, "kept");
-+		return 0;
-+	}
-+
-+	lgd_sic_dump_power_mode(ctx, "after power-up");
-+
-+	ret = lgd_sic_on(ctx, steps);
++	ret = lgd_sic_dsv_enable(vsn);
 +	if (ret < 0) {
-+		/* rails stay on (rails_on): only the reset goes back */
-+		dev_err(dev, "Failed to initialize panel: %d\n", ret);
-+		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+		return ret;
++		dev_err(dev, "Failed to enable vsn: %d\n", ret);
++		goto err_vsp;
 +	}
 +
-+	lgd_sic_send_test_dcs(ctx);
-+	lgd_sic_dump_power_mode(ctx, "after init");
++	ctx->powered = true;
 +
 +	return 0;
 +
 +err_vsp:
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 +	regulator_disable(vsp);
 +err_vdd:
 +	regulator_disable(vdd);
 +	return ret;
 +}
 +
-+static int lgd_sic_unprepare(struct drm_panel *panel)
++/*
++ * Vendor power-down (mdss_dsi_panel_reset(0), LG variant): VSP and VSN off,
++ * 25 ms, reset asserted, 10 ms, then the I/O supply. It runs before the DSI
++ * link goes down, as in the vendor driver.
++ */
++static void lgd_sic_power_off(struct lgd_sic *ctx)
++{
++	if (!ctx->powered)
++		return;
++
++	regulator_disable(ctx->supplies[1].consumer);
++	regulator_disable(ctx->supplies[2].consumer);
++	msleep(25);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	msleep(10);
++
++	regulator_disable(ctx->supplies[0].consumer);
++
++	ctx->powered = false;
++}
++
++/*
++ * The bootloader leaves the panel powered, initialized and displaying its
++ * splash screen. Like the vendor driver ("continuous splash"), take it over
++ * as it is: only account for the supplies, without toggling them.
++ */
++static int lgd_sic_take_over(struct lgd_sic *ctx)
++{
++	struct device *dev = &ctx->dsi[0]->dev;
++	int ret;
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
++	if (ret < 0) {
++		dev_err(dev, "Failed to enable regulators: %d\n", ret);
++		return ret;
++	}
++
++	ctx->powered = true;
++	ctx->initialized = true;
++
++	dev_info(dev, "panel left on by the bootloader, kept as is\n");
++
++	return 0;
++}
++
++static int lgd_sic_prepare(struct drm_panel *panel)
 +{
 +	struct lgd_sic *ctx = to_lgd_sic(panel);
 +	struct device *dev = &ctx->dsi[0]->dev;
 +	int ret;
 +
-+	if (send_off) {
-+		ret = lgd_sic_off(ctx);
-+		if (ret < 0)
-+			dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
++	if (ctx->splash) {
++		ctx->splash = false;
++		return lgd_sic_take_over(ctx);
 +	}
 +
++	if (!ctx->powered) {
++		ret = lgd_sic_power_on(ctx);
++		if (ret < 0)
++			return ret;
++	}
++
++	ret = lgd_sic_on(ctx);
++	if (ret < 0) {
++		dev_err(dev, "Failed to initialize panel: %d\n", ret);
++		lgd_sic_power_off(ctx);
++		return ret;
++	}
++
++	ctx->initialized = true;
++
++	return 0;
++}
++
++/*
++ * Called while the video stream is still running, which the off commands
++ * need: once the MDP interface has stopped, the DSI video engine never
++ * leaves room for a command and the transfer times out.
++ */
++static int lgd_sic_disable(struct drm_panel *panel)
++{
++	struct lgd_sic *ctx = to_lgd_sic(panel);
++	struct device *dev = &ctx->dsi[0]->dev;
++	int ret;
++
++	if (!ctx->initialized || !send_off)
++		return 0;
++
++	ret = lgd_sic_off(ctx);
++	if (ret < 0)
++		dev_err(dev, "Failed to send the off sequence: %d\n", ret);
++
++	/* Whatever happened, the next prepare starts with a soft reset */
++	ctx->initialized = false;
++
++	return 0;
++}
++
++static int lgd_sic_unprepare(struct drm_panel *panel)
++{
++	struct lgd_sic *ctx = to_lgd_sic(panel);
++
++	ctx->initialized = false;
++
 +	/*
-+	 * Keep VDD/VSP/VSN on: after a VSP/VSN power cycle the panel stays
-+	 * black (init_steps bit 0). Reset is the low-power state.
++	 * Do not leave the panel powered without a video stream: with its
++	 * VSP/VSN rails up and nothing to scan out, the image sticks.
 +	 */
-+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	if (!keep_power)
++		lgd_sic_power_off(ctx);
 +
 +	return 0;
 +}
@@ -544,6 +493,7 @@ index 000000000..769649da0
 +
 +static const struct drm_panel_funcs lgd_sic_panel_funcs = {
 +	.prepare = lgd_sic_prepare,
++	.disable = lgd_sic_disable,
 +	.unprepare = lgd_sic_unprepare,
 +	.get_modes = lgd_sic_get_modes,
 +};
@@ -574,11 +524,34 @@ index 000000000..769649da0
 +	if (ret < 0)
 +		return dev_err_probe(dev, ret, "Failed to get regulators\n");
 +
++	/*
++	 * Ask for the vendor VSP/VSN voltage, so that it can be written back
++	 * after each enable (regulator_sync_voltage()). Not fatal: a
++	 * regulator fixed at another voltage still powers the panel.
++	 */
++	for (i = 1; i < ARRAY_SIZE(ctx->supplies); i++) {
++		ret = regulator_set_voltage(ctx->supplies[i].consumer,
++					    LGD_SIC_DSV_UV, LGD_SIC_DSV_UV);
++		if (ret < 0)
++			dev_warn(dev, "Cannot set %s to %d uV: %d\n",
++				 lgd_sic_supply_names[i], LGD_SIC_DSV_UV, ret);
++	}
++
 +	/* Keep the panel as the bootloader left it until prepare() */
 +	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
 +	if (IS_ERR(ctx->reset_gpio))
 +		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
 +				     "Failed to get reset-gpios\n");
++
++	/*
++	 * Reset released: the bootloader has the panel running (an unused
++	 * PMIC GPIO is an input pulled low, which reads as asserted).
++	 * Otherwise the panel starts from a cold power-up, held in reset.
++	 */
++	if (!gpiod_get_value_cansleep(ctx->reset_gpio))
++		ctx->splash = true;
++	else
++		gpiod_direction_output(ctx->reset_gpio, 1);
 +
 +	/* Right half: DSI1, found through port@1 of the panel node */
 +	dsi1 = of_graph_get_remote_node(dev->of_node, 1, -1);
@@ -596,7 +569,6 @@ index 000000000..769649da0
 +
 +	ctx->dsi[0] = dsi;
 +	mipi_dsi_set_drvdata(dsi, ctx);
-+	lgd_sic_dev = ctx;
 +
 +	ctx->panel.prepare_prev_first = true;
 +
@@ -634,7 +606,6 @@ index 000000000..769649da0
 +{
 +	struct lgd_sic *ctx = mipi_dsi_get_drvdata(dsi);
 +
-+	lgd_sic_dev = NULL;
 +	drm_panel_remove(&ctx->panel);
 +}
 +
