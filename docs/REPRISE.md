@@ -71,10 +71,10 @@ Réglages de repli, sans recompiler :
 - **Fréquence du CPU** : aucun changement de fréquence (ni HFPLL ni
   kraitcc dans le dtsi amont, CONFIG_KRAITCC absent). Les cœurs tournent
   à la fréquence du bootloader ; Android monte à 2,5 GHz. C'est l'écart
-  principal de fluidité. Première mesure à faire : `sudo devmem32
-  0xf908a000` puis `sudo devmem32 0xf908a004` (mode et L du HFPLL du
-  cœur 0, adresse à confirmer : fréquence = L × 19,2 MHz si le mux du
-  Krait est sur le HFPLL).
+  principal de fluidité. Première mesure à faire, sans risque (compteur
+  de cycles du PMU Krait, `apk add perf`) :
+  `perf stat -e cycles -- timeout 2 sh -c 'while :; do :; done'` : le
+  nombre de cycles divisé par 2 donne la fréquence réelle du cœur.
 - Tension CX : personne ne la vote, d'où l'AXI limité à 291,75 MHz (palier
   nominal) au lieu des 400 MHz d'Android.
 - GTK4 en rendu cairo (blocage du GPU avec le moteur « ngl »).
