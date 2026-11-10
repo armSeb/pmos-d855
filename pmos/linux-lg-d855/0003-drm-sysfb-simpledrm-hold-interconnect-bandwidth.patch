@@ -11,10 +11,16 @@ simple-framebuffer node for as long as simpledrm is bound: average sized
 for the framebuffer at 60 Hz with a 2x margin, peak at the maximum so the
 bus is never clocked below what the firmware set up.
 
+A path named "bus" in "interconnect-names" only gets the framebuffer
+sized vote, peak included. It is meant for buses clocked by the clock
+framework (the MSM8974 MMSS NoC): their maximum rate may need a supply
+voltage corner that nothing has asked for, while the framebuffer sized
+vote gives back the rate the firmware had set (100 MHz on the LG G3).
+
 Signed-off-by: armSeb <armSeb@users.noreply.github.com>
 ---
 diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
-index a1c311933..32b6b4a35 100644
+index a1c311933..3b8a0cdf7 100644
 --- a/drivers/gpu/drm/sysfb/simpledrm.c
 +++ b/drivers/gpu/drm/sysfb/simpledrm.c
 @@ -2,6 +2,8 @@
@@ -38,7 +44,7 @@ index a1c311933..32b6b4a35 100644
  
  	/* modesetting */
  	u32 formats[DRM_SYSFB_PLANE_NFORMATS(1)];
-@@ -547,6 +554,93 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
+@@ -547,6 +554,105 @@ static int simpledrm_device_attach_genpd(struct simpledrm_device *sdev)
  }
  #endif
  
@@ -52,6 +58,11 @@ index a1c311933..32b6b4a35 100644
 + * every path listed in "interconnects": average sized for the framebuffer
 + * at 60 Hz with some margin, peak at the maximum so the bus is never
 + * clocked below what the firmware set up.
++ *
++ * A path named "bus" in "interconnect-names" only gets the framebuffer
++ * sized vote, peak included: it is meant for buses clocked by the clock
++ * framework, whose maximum rate may need a supply voltage that nothing
++ * has asked for yet.
 + */
 +
 +static void simpledrm_device_release_icc(void *res)
@@ -91,6 +102,8 @@ index a1c311933..32b6b4a35 100644
 +
 +	for (i = 0; i < count; i++) {
 +		struct icc_path *path = of_icc_get_by_index(ddev, i);
++		const char *name = NULL;
++		u32 peak = INT_MAX;
 +
 +		if (IS_ERR(path)) {
 +			ret = PTR_ERR(path);
@@ -101,7 +114,12 @@ index a1c311933..32b6b4a35 100644
 +			continue;
 +		}
 +
-+		ret = icc_set_bw(path, bw, INT_MAX);
++		of_property_read_string_index(ddev->of_node,
++					      "interconnect-names", i, &name);
++		if (name && !strcmp(name, "bus"))
++			peak = bw;
++
++		ret = icc_set_bw(path, bw, peak);
 +		if (ret) {
 +			drm_warn(dev, "failed to vote on interconnect path %u: %d\n",
 +				 i, ret);
@@ -111,7 +129,7 @@ index a1c311933..32b6b4a35 100644
 +		sdev->icc_paths[sdev->icc_count++] = path;
 +	}
 +
-+	drm_info(dev, "holding %u interconnect path(s), avg %u kB/s, peak max\n",
++	drm_info(dev, "holding %u interconnect path(s), avg %u kB/s\n",
 +		sdev->icc_count, bw);
 +
 +	return devm_add_action_or_reset(ddev, simpledrm_device_release_icc, sdev);
@@ -132,7 +150,7 @@ index a1c311933..32b6b4a35 100644
  /*
   * Modesetting
   */
-@@ -681,6 +775,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+@@ -681,6 +787,10 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
  			return ERR_PTR(-EINVAL);
  	}
  

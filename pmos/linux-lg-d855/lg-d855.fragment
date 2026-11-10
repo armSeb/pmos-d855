@@ -73,3 +73,6 @@ CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
 # s'épuisent sous Phosh (« could not get pages: -28 »). CMA 512 Mo, vram=384m
 # (modprobe.d du paquet device).
 CONFIG_CMA_SIZE_MBYTES=512
+# Bridage thermique du GPU par devfreq (zones gpu-top / gpu-bottom du DTS) :
+# indispensable avec les fréquences d'Android (jusqu'à 578 MHz)
+CONFIG_DEVFREQ_THERMAL=y

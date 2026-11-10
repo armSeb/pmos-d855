@@ -27,6 +27,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+#include <dt-bindings/thermal/thermal.h>
 
 / {
 	model = "LG G3 (D855)";
@@ -65,14 +66,19 @@
 			reg = <0x03200000 (1440 * 2560 * 3)>;
 			memory-region = <&cont_splash_mem>;
 			/*
-			 * Garde la mémoire principale (BIMC) à pleine vitesse
-			 * (patch 0003 de simpledrm), sur le chemin d'entrée du
-			 * trafic multimédia (BIMC_TO_MNOC ; AMPSS_M0 n'a pas de
-			 * lien vers EBI dans le driver). Le bus multimédia (MMSS NoC),
-			 * lui, n'est pas voté : son driver est désactivé plus bas
-			 * pour qu'il garde les réglages du bootloader.
+			 * Votes de simpledrm (patch 0003) tant que le bootloader
+			 * affiche :
+			 * - « mem » : mémoire principale (BIMC) à pleine vitesse,
+			 *   sur le chemin d'entrée du trafic multimédia
+			 *   (BIMC_TO_MNOC ; AMPSS_M0 n'a pas de lien vers EBI dans
+			 *   le driver) ;
+			 * - « bus » : bus multimédia (MMSS NoC) au débit du
+			 *   framebuffer seulement, soit les 100 MHz du bootloader
+			 *   (voir &mmssnoc plus bas).
 			 */
-			interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>;
+			interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>,
+					<&mmssnoc MNOC_MAS_MDP_PORT0 &mmssnoc MNOC_TO_BIMC>;
+			interconnect-names = "mem", "bus";
 			/*
 			 * Le chargement de msm (sonde MDSS/MDP/DSI, runtime PM)
 			 * coupe le GDSC MDSS et les horloges du MDP bien avant le
@@ -363,14 +369,84 @@
 /*
  * GPU Adreno 330, lié au pilote d'affichage msm.
  * - pas d'IOMMU GPU décrite pour la MSM8974 : msm.allow_vram_carveout=1 ;
- * - interconnects retirés : le chemin gfx-mem passe par mmssnoc, désactivé
- *   (son premier vote casse l'affichage hérité), et ocmem est optionnel.
+ * - interconnects du dtsi conservés : le vote du GPU (fréquence max x 8
+ *   octets) monte le bus multimédia de 100 à 291,75 MHz, voir &mmssnoc ;
+ * - fréquences d'Android pour la MSM8974Pro-AC (msm8974pro.dtsi LG :
+ *   578 / 462,4 / 389 / 330 / 200 / 27 MHz). La source d'horloge du GPU
+ *   (gfx3d_clk_src) est gérée par le RPM, tension du rail comprise : le
+ *   noyau ne demande qu'une fréquence, comme le pilote kgsl d'Android.
+ *   Le dtsi en amont s'arrête aux 320 MHz de la MSM8974 d'origine ;
+ * - #cooling-cells : le GPU est bridé par les zones thermiques gpu-top /
+ *   gpu-bottom plus bas (CONFIG_DEVFREQ_THERMAL).
  */
 &gpu {
-	/delete-property/ interconnects;
-	/delete-property/ interconnect-names;
+	#cooling-cells = <2>;
 
 	status = "okay";
+};
+
+/*
+ * Bridage thermique du GPU : dès 80 °C sur l'un de ses deux capteurs, le
+ * noyau baisse sa fréquence maximale pas à pas (Android le fait depuis
+ * l'espace utilisateur, thermal-engine). Le seuil « hot » à 90 °C du dtsi
+ * reste en place.
+ */
+/ {
+	thermal-zones {
+		gpu-top-thermal {
+			trips {
+				gpu_top_passive: trip-passive {
+					temperature = <80000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu_top_passive>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		gpu-bottom-thermal {
+			trips {
+				gpu_bottom_passive: trip-passive {
+					temperature = <80000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu_bottom_passive>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+};
+
+&gpu_opp_table {
+	/delete-node/ opp-320000000;
+
+	opp-578000000 {
+		opp-hz = /bits/ 64 <578000000>;
+	};
+
+	opp-462400000 {
+		opp-hz = /bits/ 64 <462400000>;
+	};
+
+	opp-389000000 {
+		opp-hz = /bits/ 64 <389000000>;
+	};
+
+	opp-330000000 {
+		opp-hz = /bits/ 64 <330000000>;
+	};
 };
 
 &mdss {
@@ -378,8 +454,11 @@
 };
 
 /*
- * Bande passante du MDP : mdp0-mem passe normalement par mmssnoc, désactivé
- * (voir plus bas). On vote sur BIMC, comme simpledrm le faisait.
+ * Bande passante du MDP : mdp5 vote 6,4 Go/s en dur sur mdp0-mem. Par
+ * mmssnoc, cela mettrait l'horloge AXI à 400 MHz (palier de tension
+ * « turbo », que rien ne vote ici) : on garde le vote sur BIMC seul, qui
+ * tient la mémoire à pleine vitesse, et c'est le GPU qui règle mmssnoc
+ * (voir plus bas).
  */
 &mdp {
 	interconnects = <&bimc BIMC_TO_MNOC &bimc BIMC_SLV_EBI_CH0>;
@@ -387,16 +466,21 @@
 };
 
 /*
- * Bus multimédia (MMSS NoC) : laissé tel que le bootloader l'a réglé tant
- * que l'affichage passe par son framebuffer. Son driver d'interconnect part
- * d'une bande passante nulle : au premier vote ou au sync_state, il baisse
- * l'horloge AXI (MMSS_S0_AXI) sous le MDP qui balaie l'écran, et le MDP5
- * passe en underflow (écran bleu). Seuls le MDP et le GPU l'utilisent, et
- * les deux sont désactivés.
+ * Bus multimédia (MMSS NoC), partagé par le MDP et le GPU. Le bootloader
+ * laisse son horloge AXI à 100 MHz, soit 1,6 Go/s, dont l'affichage 1440p
+ * prend déjà plus de la moitié : le GPU n'avait pas de quoi rendre 60
+ * images par seconde. Android la monte à 400 MHz dès que l'écran est allumé.
+ *
+ * Son pilote d'interconnect part d'une bande passante nulle : au premier
+ * vote ou au sync_state il règle l'horloge sur la somme des votes, et sans
+ * vote suffisant le MDP passe en underflow (écran bleu). D'où :
+ * - simpledrm vote dessus tant qu'il affiche (chemin « bus » du nœud
+ *   framebuffer, patch 0003) : 1,3 Go/s, soit les 100 MHz du bootloader ;
+ * - le GPU vote ensuite 4,6 Go/s en permanence (a3xx_gpu_init) : 291,75 MHz,
+ *   le maximum du palier de tension « nominal » (personne ne vote la
+ *   tension CX dans ce noyau, d'où le choix de ne pas viser 400 MHz) ;
+ * - le MDP garde son vote sur BIMC seul (6,4 Go/s, mémoire à pleine vitesse).
  */
-&mmssnoc {
-	status = "disabled";
-};
 
 &mdss_dsi0 {
 	vdda-supply = <&pm8941_l2>;
