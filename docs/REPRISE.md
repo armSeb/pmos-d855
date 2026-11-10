@@ -48,6 +48,13 @@ sudo devmem32 0xf9012014     # PMIC_STS du SAW L2 : bits 7:0 × 5 mV
 sudo devmem32 0xf9088014; sudo devmem32 0xf908801c   # CPU0 : gate ctl / mode
 grep -m1 -i -E "variant|part|revision" /proc/cpuinfo
 ```
+Relevé du 10 novembre (r43) : PTE 0x0000c55b / 0x3821a399 (brut =
+corrigé) → speed bin 3, PVS 5, version 1, fusibles programmés : table
+`speed3-pvs5-v1` (975 mV à 1958,4 MHz, 1,07 V à 2457,6 MHz). PMIC_STS du
+SAW L2 = 0 (le SAW n'a jamais envoyé de consigne : la consigne de 1,1 V à
+l'enregistrement est bien nécessaire). CPU0 : gate ctl 0x403f3f7f, mode 0
+→ BHS. Krait 0x512f06f1 (variant 2, révision 1) : pas de 1,15 V imposé.
+
 Puis avec r44 :
 ```
 dmesg | grep -i -E "krait|hfpll|L2 @|CPU[0-3] @|saw|cpufreq|speed bin|pvs|power gate|cooling"
