@@ -1,89 +1,107 @@
-# Point de reprise — affichage natif (MDP5/DSI) et GPU
+# Point de reprise — fréquence des CPU (Krait), affichage et GPU
 
 Note de passation entre sessions de travail. Le README reste la référence
 pour l'état général ; ce fichier décrit le chantier en cours.
 
-## État (linux-lg-d855 r43, device-lg-d855 r22)
+## État (linux-lg-d855 r44, device-lg-d855 r22)
 
 Acquis, testé sur le téléphone :
 - démarrage autonome (lk2nd → extlinux sur la microSD), carte créée par
   `pmos/install-sdcard.sh` utilisable d'emblée (Phosh, firmwares, WiFi) ;
-- affichage natif : MDP5 en split display (DSI0 + DSI1 couplés, commandes
-  en broadcast), panneau repris tel que le bootloader l'a laissé ;
+- affichage natif : MDP5 en split display, séquences du panneau d'Android,
+  extinction et rallumage de l'écran fiables (r43) ;
 - GPU Adreno 330 sous Phosh, rétroéclairage LM3697.
 
-Revue du 10 novembre, à valider sur le téléphone (rien n'a pu être testé
-sur le matériel ; les pilotes et le DTB compilent, la série de patches
-s'applique sur le commit épinglé) :
+## Chantier en cours : fréquence des cœurs (r44, non testé sur le matériel)
 
-1. **Panneau, séquence d'Android** (patch 0002 réécrit sur mdss_dsi.c /
-   mdss_dsi_panel.c de LG) :
-   - premier allumage : panneau du bootloader repris sans reset ni
-     commande (« continuous splash »), détecté par le reset relâché ;
-   - extinction : display off + sleep in dans `.disable`, pendant que la
-     vidéo tourne (dans `.unprepare`, l'interface du MDP est déjà arrêtée
-     et la commande expirait en -110), puis VSP/VSN coupés, 25 ms, reset ;
-   - rallumage : VDD, VSP (bascule 1-0-1 comme LG), 5 ms, reset relâché,
-     5 ms, VSN, puis soft reset DCS (0x01), table, sleep out, 5 ms,
-     display on. Le soft reset en tête, présent chez LG, avait été retiré
-     au pkgrel 30 : sans lui, sleep out est sans effet sur un contrôleur
-     qui se croit éveillé (le reset par GPIO 19 n'a aucun effet visible).
-2. **Horloge HS du DSI après l'init du panneau** (patch 0011) : msm
-   forçait la lane d'horloge en HS dès la mise sous tension de l'hôte,
-   avant le reset et les commandes. LG garde toutes les lanes en LP-11,
-   envoie les commandes, puis force l'horloge (mdss_dsi_unblank), et la
-   relâche après les commandes d'extinction (mdss_dsi_blank).
-3. **VSP/VSN à ±5,0 V** au lieu de ±5,5 V : valeur du pilote LG
-   (TPS65132_VREG_LV_50) et du bootloader (« Bringing 5000000uV into
-   5500000 » au démarrage). Le panneau était suralimenté de 10 %.
-4. **Rétroéclairage** : table de luminosité d'Android (256 niveaux, code
-   maximum 1892), défaut 242 (code 1599).
-5. **GPU** : fréquences d'Android (578 / 462,4 / 389 / 330 / 200 / 27 MHz ;
-   le RPM gère la tension du rail avec la fréquence, kgsl ne fait que
-   clk_set_rate), bridage thermique dès 80 °C (DEVFREQ_THERMAL).
-6. **Bus multimédia** : horloge AXI du MMSS NoC de 100 à 291,75 MHz par le
-   vote du GPU (mmssnoc réactivé, interconnects du GPU rétablis, vote
-   borné de simpledrm sur le chemin « bus », patch 0003). À 100 MHz le
-   bus passe 1,6 Go/s, dont 0,9 pour le balayage 1440p : le GPU ne pouvait
-   pas rendre 60 images par seconde.
+Jusqu'à r43, aucun changement de fréquence : les cœurs restaient à la
+fréquence du bootloader. r44 ajoute tout le chemin, sur le modèle du noyau
+Android de LG (clock-krait-8974.c, krait-regulator.c, spm-v2.c,
+msm8974pro.dtsi). Les pilotes, le DTB et le noyau complet compilent ; la
+série de patches s'applique sur le commit épinglé.
 
-### Tests à faire avec r43
+| Pièce | Où | Rôle |
+|---|---|---|
+| HFPLL des 4 cœurs et du L2 | patch 0012, DTS `&soc` | « qcom,msm8974-hfpll », config 0x04d0405d de LG |
+| krait-cc v2 | patch 0013, DTS `kraitcc` | mux des cœurs et du L2 ; corrige la source auxiliaire (nom « apu_aux » erroné, sélecteurs QSB=0 / aux=2 de LG) |
+| Rail des Krait | patch 0014, DTS `&saw_l2` | consigne au PMIC par le VCTL du SAW du L2 (pas de 5 mV), 1,1 V envoyés à l'enregistrement, 0,725-1,12 V |
+| cpufreq | patch 0015, DTS `cpu_opp_table` | tables PVS de LG (fusible `&qfprom` 0xb0), vote CX par required-opps, L2 qui suit les cœurs, garde-fous |
+| Thermique | DTS, CONFIG_CPU_THERMAL | bridage des cœurs dès 75 °C (seuils passifs du dtsi) |
+
+Garde-fous de qcom-cpufreq-nvmem, qui refuse alors de changer la fréquence
+(rien ne change par rapport à r43, message dans dmesg) :
+- un cœur dont l'interrupteur d'alimentation n'est pas en mode BHS (il
+  serait sur son LDO interne, que la tension du rail ne relève pas) ;
+- les révisions de Krait que LG fait tourner à 1,15 V fixes ;
+- un speed bin autre que 1 ou 3 (aucune OPP ne correspond).
+
+Paliers : 300 MHz à 1958,4 MHz par défaut ; 2265,6 et 2457,6 MHz sont en
+`turbo-mode`, à débloquer à la main une fois la base validée :
+`echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost`.
+
+### Tests à faire avec r44, dans l'ordre
+Avant de démarrer r44, relever depuis r43 (lectures seules, sans risque) :
 ```
-dmesg | grep -i -E "lgd|panel|dsi|mdp5|interconnect|devfreq|cooling|rcg"
-cat /sys/class/devfreq/fdb00000.gpu/available_frequencies
-sudo grep -E "mmss_axi|oxilicx_axi|mmss_s0" /sys/kernel/debug/clk/clk_summary
-sudo cat /sys/kernel/debug/interconnect/interconnect_summary
-sudo i2cget -f -y 2 0x3e 0x00    # 0x0a = 5,0 V
+sudo devmem32 0xfc4b80b0; sudo devmem32 0xfc4b80b4   # fusible PTE (brut)
+sudo devmem32 0xfc4bc0b0; sudo devmem32 0xfc4bc0b4   # même fusible (corrigé)
+sudo devmem32 0xf9012014     # PMIC_STS du SAW L2 : bits 7:0 × 5 mV
+sudo devmem32 0xf9088014; sudo devmem32 0xf908801c   # CPU0 : gate ctl / mode
+grep -m1 -i -E "variant|part|revision" /proc/cpuinfo
 ```
-Puis extinction / rallumage de l'écran au bouton power, plusieurs fois.
+Puis avec r44 :
+```
+dmesg | grep -i -E "krait|hfpll|L2 @|CPU[0-3] @|saw|cpufreq|speed bin|pvs|power gate|cooling"
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_available_frequencies
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+sudo cat /sys/kernel/debug/regulator/regulator_summary | grep -A6 krait
+perf stat -e cycles -- timeout 2 sh -c 'while :; do :; done'   # cycles / 2 = Hz réels
+```
+Charge soutenue (`stress-ng --cpu 4 -t 60` ou une compilation), puis le
+boost, puis à nouveau la charge.
 
-Réglages de repli, sans recompiler :
+### Replis
 | Symptôme | Essai |
 |---|---|
-| noir au rallumage | `echo 1 > /sys/module/panel_lge_g3_lgd_sic/parameters/keep_power` (VSP/VSN gardés), puis extinction/rallumage |
-| noir au rallumage | `echo 1 > /sys/module/msm/parameters/dsi_early_hs_clk` (horloge HS dès la mise sous tension, comme avant) |
-| erreurs -110 à l'extinction | `echo 0 > …/panel_lge_g3_lgd_sic/parameters/send_off` |
-| doute sur le soft reset | `echo 0 > …/panel_lge_g3_lgd_sic/parameters/soft_reset` |
-| écran bleu ou noir au démarrage | bus multimédia : remettre `&mmssnoc { status = "disabled"; }`, retirer le chemin « bus » du nœud framebuffer et remettre les deux `/delete-property/` du nœud `&gpu`, puis `DTB_ONLY=1 tools/build-kernel.sh` |
-| console simpledrm seule | `module_blacklist=msm` sur la ligne `append` |
+| plantage ou gel après le démarrage | `module_blacklist=qcom_cpufreq_nvmem` sur la ligne `append` : plus de changement de fréquence (le rail reste à 1,1 V) |
+| instable seulement en boost | ne pas activer le boost (défaut) |
+| instable sous charge | plafonner : `echo 1497600 \| sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq` et me donner le dmesg |
+| plantage très tôt (avant la console) | retirer les nœuds `kraitcc`, HFPLL, `cpu_opp_table` et les surcharges `&cpu0`-`&cpu3` du DTS, puis `DTB_ONLY=1 tools/build-kernel.sh` |
 
-### Ce qui reste, par ordre d'effet attendu
-- **Fréquence du CPU** : aucun changement de fréquence (ni HFPLL ni
-  kraitcc dans le dtsi amont, CONFIG_KRAITCC absent). Les cœurs tournent
-  à la fréquence du bootloader ; Android monte à 2,5 GHz. C'est l'écart
-  principal de fluidité. Première mesure à faire, sans risque (compteur
-  de cycles du PMU Krait, `apk add perf`) :
-  `perf stat -e cycles -- timeout 2 sh -c 'while :; do :; done'` : le
-  nombre de cycles divisé par 2 donne la fréquence réelle du cœur.
-- Tension CX : personne ne la vote, d'où l'AXI limité à 291,75 MHz (palier
-  nominal) au lieu des 400 MHz d'Android.
+Limites connues :
+- entre le chargement du pilote et le premier changement de fréquence de
+  chaque cœur, un cœur encore à sa fréquence de démarrage ne vote pas de
+  palier CX (comme avant r44, où rien ne le votait) ;
+- pas de vote de bande passante DDR par le CPU (LG en fait un) : le MDP
+  tient déjà la mémoire à pleine vitesse ;
+- le nombre de phases du PMIC reste au maximum (LG l'adapte à la charge) ;
+- la mise en ligne d'un cœur (hotplug) écrit aussi le VCTL du SAW du L2,
+  sans le verrou du régulateur.
+
+## Affichage et GPU (r43), validés
+
+1. **Panneau, séquence d'Android** (patch 0002 réécrit sur mdss_dsi.c /
+   mdss_dsi_panel.c de LG) : panneau du bootloader repris tel quel au
+   démarrage ; display off + sleep in dans `.disable`, VSP/VSN coupés et
+   reset à l'extinction ; soft reset DCS en tête de l'init au rallumage.
+2. **Horloge HS du DSI après l'init du panneau** (patch 0011).
+3. **VSP/VSN à ±5,0 V** (valeur LG) au lieu de ±5,5 V.
+4. **Rétroéclairage** : table de luminosité d'Android.
+5. **GPU** : fréquences d'Android (jusqu'à 578 MHz), bridage dès 80 °C.
+6. **Bus multimédia** : AXI du MMSS NoC à 291,75 MHz par le vote du GPU.
+
+Réglages de repli de l'affichage, sans recompiler : paramètres
+`keep_power`, `send_off`, `soft_reset` du module panel_lge_g3_lgd_sic,
+`dsi_early_hs_clk` du module msm, `module_blacklist=msm`.
+
+### Ce qui reste
+- Tension CX : l'AXI du MMSS reste limité à 291,75 MHz (palier nominal)
+  au lieu des 400 MHz d'Android ; les cœurs votent maintenant CX, on
+  pourra y revenir.
 - GTK4 en rendu cairo (blocage du GPU avec le moteur « ngl »).
 - Demi-écrans : deux CTL flushés l'un après l'autre (pas de « single
-  flush » sur MDP5 1.2) ; une image peut être mise à jour à moitié si les
-  deux écritures encadrent un vsync.
+  flush » sur MDP5 1.2).
 - Avertissements « rcg didn't update its configuration » au premier
-  modeset (horloges byte/pixel réglées pendant que la PLL DSI est
-  arrêtée) : bruit, à traiter dans mmcc-msm8974.
+  modeset : bruit, à traiter dans mmcc-msm8974.
 - USB : câble à brancher avant le démarrage (pas de détection VBUS).
 
 ## Patches noyau (pmos/linux-lg-d855)
@@ -100,6 +118,10 @@ Réglages de repli, sans recompiler :
 | 0009 | DSI : broadcast du DMA de commandes en DSI couplé synchronisé |
 | 0010 | DSI : trace des réponses de lecture invalides (mise au point) |
 | 0011 | DSI : horloge HS continue demandée après l'init du panneau |
+| 0012 | HFPLL : données MSM8974 |
+| 0013 | krait-cc v2 : source auxiliaire des mux secondaires |
+| 0014 | SPM : régulateur du rail Krait par le SAW du L2 |
+| 0015 | cpufreq qcom-nvmem : MSM8974 (vote CX, L2, garde-fous) |
 
 DTS : DSI1 `interrupts = <5>` (bug amont : <4>), nœud `fb_panel` factice
 désactivé pour que fw_devlink ne retarde pas simpledrm.

@@ -43,7 +43,7 @@ performances) est suivi dans [docs/REPRISE.md](docs/REPRISE.md).
 | Alim. panel | TPS65132 @ 0x3e, EN TLMM 56 / 100 | activé, ±5,0 V comme le pilote LG | oui |
 | Panel | LGD SIC 1440p, vidéo, **double DSI** | activé, **affichage natif testé** ✓ ; extinction/rallumage à valider (pkgrel 43) | patch 0002 ; MDP5 en « split display » (0006), DSI (0007, 0009, 0011) |
 | GPU | Adreno 330 | **testé** ✓ sous Phosh (FD330, GLES 3.0) ; fréquences d'Android (578 MHz) et bus multimédia à valider (pkgrel 43) | oui (freedreno) |
-| CPU | 4 × Krait 400 | **pas de changement de fréquence** : ni HFPLL ni kraitcc dans le dtsi amont, les cœurs restent à la fréquence laissée par le bootloader | à faire |
+| CPU | 4 × Krait 400 | changement de fréquence 300 MHz - 2,46 GHz (tables PVS de LG, rail commun piloté par le SAW du L2), **à valider** (pkgrel 44) | patches 0012-0015 |
 | Bluetooth | WCNSS (même puce que le WiFi) | activé | oui (`btqcomsmd`, firmware requis) |
 | Modem / ADSP | remoteprocs MSS / ADSP | désactivés | oui (firmware requis) |
 | Audio, capteurs, caméra, NFC | | absents | |
@@ -220,7 +220,7 @@ partitions `modem` et `system` et copie dans `/lib/firmware` :
    `append` de `/boot/extlinux/extlinux.conf` (console simpledrm).
 4. GPU : Adreno 330 sous Phosh (sans IOMMU : `allow_vram_carveout`). ✓
    Fréquences d'Android et bus multimédia à 291,75 MHz. ← **en test**
-   Reste le plus gros écart avec Android : le changement de fréquence du CPU.
+   Changement de fréquence des Krait (patches 0012-0015). ← **en test**
 5. WiFi, batterie, Bluetooth.
 6. Modem (MSS + rmtfs + ModemManager), puis audio.
 7. Upstream du DTS dans le fork msm8974-mainline puis dans Linux (ajouter son `Signed-off-by` avant l'envoi).
