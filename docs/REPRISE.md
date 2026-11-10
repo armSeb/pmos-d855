@@ -3,7 +3,7 @@
 Note de passation entre sessions de travail. Le README reste la référence
 pour l'état général ; ce fichier décrit le chantier en cours.
 
-## État (linux-lg-d855 r44, device-lg-d855 r22)
+## État (linux-lg-d855 r45, device-lg-d855 r24)
 
 Acquis, testé sur le téléphone :
 - démarrage autonome (lk2nd → extlinux sur la microSD), carte créée par
@@ -59,7 +59,9 @@ Premier démarrage de r44 : régulateur à 1,1 V, krait-cc lit L2 à
 729,6 MHz et CPU0 à 960 MHz (fréquences du bootloader), CPU1-3 « Undefined
 rate » forcés à 384 MHz. qcom-cpufreq-nvmem ne s'est pas chargé (module
 déclaré pour la racine du DT, sans événement udev) : cœurs figés, téléphone
-plus lent. device-lg-d855 r23 le charge par modules-load.d.
+plus lent. Chargé à la main : quatre cœurs en BHS, 13 paliers jusqu'à
+1958,4 MHz, fréquences qui suivent la charge. r45 l'intègre au noyau
+(avec cpufreq-dt) : actif dès le démarrage du noyau.
 
 Puis avec r44 :
 ```
@@ -75,7 +77,7 @@ boost, puis à nouveau la charge.
 ### Replis
 | Symptôme | Essai |
 |---|---|
-| plantage ou gel après le démarrage | `module_blacklist=qcom_cpufreq_nvmem` sur la ligne `append` : plus de changement de fréquence (le rail reste à 1,1 V) |
+| plantage ou gel après le démarrage | `initcall_blacklist=qcom_cpufreq_init` sur la ligne `append` : plus de changement de fréquence (le rail reste à 1,1 V) |
 | instable seulement en boost | ne pas activer le boost (défaut) |
 | instable sous charge | plafonner : `echo 1497600 \| sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq` et me donner le dmesg |
 | plantage très tôt (avant la console) | retirer les nœuds `kraitcc`, HFPLL, `cpu_opp_table` et les surcharges `&cpu0`-`&cpu3` du DTS, puis `DTB_ONLY=1 tools/build-kernel.sh` |
