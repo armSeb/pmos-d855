@@ -1,0 +1,370 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] cpufreq: qcom-nvmem: MSM8974: CX vote, L2 scaling, safety checks
+
+Krait frequency scaling on MSM8974 needs more than the PVS based OPP
+tables shared with APQ8064, according to the downstream msm8974 kernel:
+
+- the HFPLL of a core and the L2 need a CX voltage corner that depends
+  on their rate (SVS up to 998.4 MHz of VCO, nominal up to 1996.8 MHz,
+  super turbo above; L2 up to 576 / 1036.8 / 1728 MHz). Attach the "cx"
+  power domain so that the CPU OPPs can vote it with required-opps;
+- the L2 runs at a rate paired with the CPU rate (qcom,cpufreq-table).
+  Scale the L2 clock (an "l2" clock of the CPU nodes) with a transition
+  notifier, at the highest rate wanted by the CPUs: lowered before a CPU
+  slows down, raised after it sped up, so that the CX votes of the CPU
+  OPPs always cover it;
+- refuse to scale when a core is not on the shared rail (its power gate
+  is not in BHS mode: raising the rail would not raise a core on its
+  LDO), or for the Krait revisions that downstream runs at a fixed 1.15 V
+  minimum.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/cpufreq/qcom-cpufreq-nvmem.c b/drivers/cpufreq/qcom-cpufreq-nvmem.c
+index 54f811710..a7075c07b 100644
+--- a/drivers/cpufreq/qcom-cpufreq-nvmem.c
++++ b/drivers/cpufreq/qcom-cpufreq-nvmem.c
+@@ -15,13 +15,17 @@
+  * operating-points-v2 table when it is parsed by the OPP framework.
+  */
+ 
++#include <linux/bitfield.h>
++#include <linux/clk.h>
+ #include <linux/cpu.h>
++#include <linux/cpufreq.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
++#include <linux/of_address.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
+ #include <linux/pm_domain.h>
+@@ -32,6 +36,10 @@
+ 
+ #include <dt-bindings/arm/qcom,ids.h>
+ 
++#ifdef CONFIG_ARM
++#include <asm/cputype.h>
++#endif
++
+ enum ipq806x_versions {
+ 	IPQ8062_VERSION = 0,
+ 	IPQ8064_VERSION,
+@@ -47,6 +55,12 @@ enum ipq8074_versions {
+ 
+ struct qcom_cpufreq_drv;
+ 
++/* L2 cache rate to use for a given CPU rate (Krait) */
++struct qcom_cpufreq_l2_rate {
++	unsigned long cpu_hz;
++	unsigned long l2_hz;
++};
++
+ struct qcom_cpufreq_match_data {
+ 	int (*get_version)(struct device *cpu_dev,
+ 			   struct nvmem_cell *speedbin_nvmem,
+@@ -54,6 +68,26 @@ struct qcom_cpufreq_match_data {
+ 			   struct qcom_cpufreq_drv *drv);
+ 	const char **pd_names;
+ 	unsigned int num_pd_names;
++	/* checks that the platform can be scaled at all */
++	int (*check)(struct device *dev);
++	/* L2 rates, ascending CPU rates, for CPUs with an "l2" clock */
++	const struct qcom_cpufreq_l2_rate *l2_rates;
++	unsigned int num_l2_rates;
++};
++
++/*
++ * L2 cache clock shared by all the CPUs: it runs at the highest of the rates
++ * wanted by each CPU. Lowered before a CPU slows down, raised after it has
++ * sped up, so that the power domain votes of the CPU OPPs (which cover the
++ * L2 rate paired with them) are always in place.
++ */
++struct qcom_cpufreq_l2 {
++	struct clk *clk;
++	const struct qcom_cpufreq_l2_rate *rates;
++	unsigned int num_rates;
++	struct notifier_block nb;
++	struct mutex lock;
++	unsigned long wanted[NR_CPUS];
+ };
+ 
+ struct qcom_cpufreq_drv_cpu {
+@@ -64,6 +98,7 @@ struct qcom_cpufreq_drv_cpu {
+ struct qcom_cpufreq_drv {
+ 	u32 versions;
+ 	const struct qcom_cpufreq_match_data *data;
++	struct qcom_cpufreq_l2 *l2;
+ 	struct qcom_cpufreq_drv_cpu cpus[];
+ };
+ 
+@@ -404,6 +439,110 @@ static const struct qcom_cpufreq_match_data match_data_krait = {
+ 	.get_version = qcom_cpufreq_krait_name_version,
+ };
+ 
++/*
++ * MSM8974 Krait CPUs are powered from a rail shared through their BHS
++ * (power switch). Each core also has an LDO which the downstream kernel
++ * uses at low voltages; this kernel never does, but make sure that the
++ * firmware did not leave a core running on it: raising the shared rail
++ * would not raise such a core.
++ */
++#define KRAIT_APC_PWR_GATE_CTL		0x14
++#define KRAIT_APC_PWR_GATE_MODE		0x1c
++#define KRAIT_BHS_EN			BIT(0)
++#define KRAIT_LDO_BYP			GENMASK(13, 8)
++#define KRAIT_PWR_GATE_SEQ_EN		BIT(0)
++#define KRAIT_PWR_GATE_SWITCH_MODE	GENMASK(6, 4)
++#define KRAIT_PWR_GATE_SWITCH_MODE_BHS	2
++
++static int qcom_cpufreq_msm8974_check(struct device *dev)
++{
++	unsigned int cpu;
++	int ret = 0;
++
++#ifdef CONFIG_ARM
++	/*
++	 * The downstream kernel runs these early Krait revisions at 1.15 V at
++	 * least, above the 1.12 V maximum of the PVS tables.
++	 */
++	switch (read_cpuid_id()) {
++	case 0x511f04d0:
++	case 0x511f04d1:
++	case 0x510f06f0:
++		dev_err(dev, "Krait %08x needs a fixed 1.15 V, not scaling\n",
++			read_cpuid_id());
++		return -ENODEV;
++	}
++#endif
++
++	for_each_online_cpu(cpu) {
++		struct device_node *cpu_np, *acc_np;
++		void __iomem *acc;
++		u32 ctl, mode;
++		bool bhs;
++
++		cpu_np = of_get_cpu_node(cpu, NULL);
++		if (!cpu_np)
++			return -ENODEV;
++		acc_np = of_parse_phandle(cpu_np, "qcom,acc", 0);
++		of_node_put(cpu_np);
++		if (!acc_np)
++			return -ENODEV;
++		acc = of_iomap(acc_np, 0);
++		of_node_put(acc_np);
++		if (!acc)
++			return -ENOMEM;
++
++		ctl = readl_relaxed(acc + KRAIT_APC_PWR_GATE_CTL);
++		mode = readl_relaxed(acc + KRAIT_APC_PWR_GATE_MODE);
++		iounmap(acc);
++
++		if (mode & KRAIT_PWR_GATE_SEQ_EN)
++			bhs = FIELD_GET(KRAIT_PWR_GATE_SWITCH_MODE, mode) ==
++			      KRAIT_PWR_GATE_SWITCH_MODE_BHS;
++		else
++			bhs = (ctl & KRAIT_BHS_EN) &&
++			      (ctl & KRAIT_LDO_BYP) == KRAIT_LDO_BYP;
++
++		dev_info(dev, "CPU%u power gate ctl %08x mode %08x: %s\n",
++			 cpu, ctl, mode, bhs ? "BHS" : "not on BHS");
++		if (!bhs)
++			ret = -ENODEV;
++	}
++
++	if (ret)
++		dev_err(dev, "a core is not on the shared rail, not scaling\n");
++
++	return ret;
++}
++
++/* Downstream msm8974pro qcom,cpufreq-table: CPU rate, L2 rate */
++static const struct qcom_cpufreq_l2_rate msm8974_l2_rates[] = {
++	{  300000000,  300000000 },
++	{  422400000,  422400000 },
++	{  652800000,  499200000 },
++	{  729600000,  576000000 },
++	{  883200000,  576000000 },
++	{  960000000,  960000000 },
++	{ 1036800000, 1036800000 },
++	{ 1190400000, 1036800000 },
++	{ 1267200000, 1267200000 },
++	{ 1497600000, 1497600000 },
++	{ 1574400000, 1574400000 },
++	{ 1728000000, 1651200000 },
++	{ 1958400000, 1728000000 },
++	{ 2265600000, 1728000000 },
++	{ 2457600000, 1728000000 },
++};
++
++static const struct qcom_cpufreq_match_data match_data_msm8974 = {
++	.get_version = qcom_cpufreq_krait_name_version,
++	.pd_names = (const char *[]) { "cx" },
++	.num_pd_names = 1,
++	.check = qcom_cpufreq_msm8974_check,
++	.l2_rates = msm8974_l2_rates,
++	.num_l2_rates = ARRAY_SIZE(msm8974_l2_rates),
++};
++
+ static const struct qcom_cpufreq_match_data match_data_msm8909 = {
+ 	.get_version = qcom_cpufreq_simple_get_version,
+ 	.pd_names = (const char *[]) { "perf" },
+@@ -427,6 +566,106 @@ static const struct qcom_cpufreq_match_data match_data_ipq8074 = {
+ 	.get_version = qcom_cpufreq_ipq8074_name_version,
+ };
+ 
++static unsigned long qcom_cpufreq_l2_rate(struct qcom_cpufreq_l2 *l2,
++					  unsigned long cpu_hz)
++{
++	unsigned long rate = l2->rates[0].l2_hz;
++	unsigned int i;
++
++	for (i = 0; i < l2->num_rates; i++)
++		if (l2->rates[i].cpu_hz <= cpu_hz)
++			rate = l2->rates[i].l2_hz;
++
++	return rate;
++}
++
++static int qcom_cpufreq_l2_notify(struct notifier_block *nb,
++				  unsigned long event, void *data)
++{
++	struct qcom_cpufreq_l2 *l2 = container_of(nb, struct qcom_cpufreq_l2, nb);
++	struct cpufreq_freqs *freqs = data;
++	unsigned long rate = 0;
++	unsigned int cpu;
++	int ret;
++
++	/* lower the L2 before slowing down, raise it after speeding up */
++	if ((event == CPUFREQ_PRECHANGE && freqs->new >= freqs->old) ||
++	    (event == CPUFREQ_POSTCHANGE && freqs->new < freqs->old))
++		return NOTIFY_DONE;
++
++	mutex_lock(&l2->lock);
++
++	for_each_cpu(cpu, freqs->policy->cpus)
++		l2->wanted[cpu] = qcom_cpufreq_l2_rate(l2, freqs->new * 1000UL);
++
++	for_each_possible_cpu(cpu)
++		rate = max(rate, l2->wanted[cpu]);
++
++	ret = clk_set_rate(l2->clk, rate);
++	if (ret)
++		pr_err_ratelimited("qcom-cpufreq-nvmem: L2 to %lu Hz: %d\n",
++				   rate, ret);
++
++	mutex_unlock(&l2->lock);
++
++	return NOTIFY_OK;
++}
++
++static int qcom_cpufreq_l2_init(struct device *dev, struct qcom_cpufreq_drv *drv)
++{
++	struct qcom_cpufreq_l2 *l2;
++	struct device *cpu_dev;
++	struct clk *clk;
++	int ret;
++
++	if (!drv->data->l2_rates)
++		return 0;
++
++	cpu_dev = get_cpu_device(0);
++	if (!cpu_dev)
++		return -ENODEV;
++
++	clk = clk_get(cpu_dev, "l2");
++	if (IS_ERR(clk)) {
++		if (PTR_ERR(clk) == -ENOENT)
++			return 0;
++		return dev_err_probe(dev, PTR_ERR(clk), "Could not get L2 clock\n");
++	}
++
++	l2 = devm_kzalloc(dev, sizeof(*l2), GFP_KERNEL);
++	if (!l2) {
++		clk_put(clk);
++		return -ENOMEM;
++	}
++
++	l2->clk = clk;
++	l2->rates = drv->data->l2_rates;
++	l2->num_rates = drv->data->num_l2_rates;
++	mutex_init(&l2->lock);
++	l2->nb.notifier_call = qcom_cpufreq_l2_notify;
++
++	ret = cpufreq_register_notifier(&l2->nb, CPUFREQ_TRANSITION_NOTIFIER);
++	if (ret) {
++		clk_put(clk);
++		return ret;
++	}
++
++	dev_info(dev, "L2 at %lu kHz, follows the CPUs\n", clk_get_rate(clk) / 1000);
++	drv->l2 = l2;
++
++	return 0;
++}
++
++static void qcom_cpufreq_l2_exit(struct qcom_cpufreq_drv *drv)
++{
++	if (!drv->l2)
++		return;
++
++	cpufreq_unregister_notifier(&drv->l2->nb, CPUFREQ_TRANSITION_NOTIFIER);
++	clk_put(drv->l2->clk);
++	drv->l2 = NULL;
++}
++
+ static void qcom_cpufreq_suspend_pd_devs(struct qcom_cpufreq_drv *drv, unsigned int cpu)
+ {
+ 	struct dev_pm_domain_list *pd_list = drv->cpus[cpu].pd_list;
+@@ -474,6 +713,12 @@ static int qcom_cpufreq_probe(struct platform_device *pdev)
+ 	if (!drv->data)
+ 		return -ENODEV;
+ 
++	if (drv->data->check) {
++		ret = drv->data->check(&pdev->dev);
++		if (ret)
++			return ret;
++	}
++
+ 	if (drv->data->get_version) {
+ 		speedbin_nvmem = of_nvmem_cell_get(np, NULL);
+ 		if (IS_ERR(speedbin_nvmem))
+@@ -532,6 +777,10 @@ static int qcom_cpufreq_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ 
++	ret = qcom_cpufreq_l2_init(&pdev->dev, drv);
++	if (ret)
++		goto free_opp;
++
+ 	cpufreq_dt_pdev = platform_device_register_simple("cpufreq-dt", -1,
+ 							  NULL, 0);
+ 	if (!IS_ERR(cpufreq_dt_pdev)) {
+@@ -541,6 +790,7 @@ static int qcom_cpufreq_probe(struct platform_device *pdev)
+ 
+ 	ret = PTR_ERR(cpufreq_dt_pdev);
+ 	dev_err(cpu_dev, "Failed to register platform device\n");
++	qcom_cpufreq_l2_exit(drv);
+ 
+ free_opp:
+ 	for_each_present_cpu(cpu) {
+@@ -556,6 +806,7 @@ static void qcom_cpufreq_remove(struct platform_device *pdev)
+ 	unsigned int cpu;
+ 
+ 	platform_device_unregister(cpufreq_dt_pdev);
++	qcom_cpufreq_l2_exit(drv);
+ 
+ 	for_each_present_cpu(cpu) {
+ 		dev_pm_domain_detach_list(drv->cpus[cpu].pd_list);
+@@ -596,7 +847,7 @@ static const struct of_device_id qcom_cpufreq_match_list[] __initconst __maybe_u
+ 	{ .compatible = "qcom,ipq8074", .data = &match_data_ipq8074 },
+ 	{ .compatible = "qcom,apq8064", .data = &match_data_krait },
+ 	{ .compatible = "qcom,ipq9574", .data = &match_data_kryo },
+-	{ .compatible = "qcom,msm8974", .data = &match_data_krait },
++	{ .compatible = "qcom,msm8974", .data = &match_data_msm8974 },
+ 	{ .compatible = "qcom,msm8960", .data = &match_data_krait },
+ 	{},
+ };

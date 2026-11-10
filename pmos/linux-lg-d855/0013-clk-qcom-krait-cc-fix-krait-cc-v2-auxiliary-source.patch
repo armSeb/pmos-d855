@@ -1,0 +1,53 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] clk: qcom: krait-cc: fix the auxiliary source of krait-cc-v2
+
+krait-cc-v2 (MSM8974) registers a shared "acpu_aux" clock (GPLL0/2) for
+the secondary muxes, but names their parent "apu_aux": the auxiliary
+source is never found and the secondary muxes can only use QSB.
+
+On MSM8974 the secondary mux selects QSB with 0 and the auxiliary clock
+with 2 (downstream clock-krait-8974.c), the opposite of the map used for
+krait-cc-v1 since commit 8e456411abcb ("clk: qcom: krait-cc: fix wrong
+parent order for secondary mux"). Use a map of its own for v2.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/clk/qcom/krait-cc.c b/drivers/clk/qcom/krait-cc.c
+index f29d6dd1f..7636e3d86 100644
+--- a/drivers/clk/qcom/krait-cc.c
++++ b/drivers/clk/qcom/krait-cc.c
+@@ -29,6 +29,15 @@ static unsigned int sec_mux_map[] = {
+ 	0,
+ };
+ 
++/*
++ * MSM8974 (krait-cc-v2): QSB is source 0 and the auxiliary clock source 2
++ * (downstream clock-krait-8974.c).
++ */
++static unsigned int sec_mux_map_v2[] = {
++	0,
++	2,
++};
++
+ static unsigned int pri_mux_map[] = {
+ 	1,
+ 	2,
+@@ -166,7 +175,7 @@ krait_add_sec_mux(struct device *dev, int id, const char *s,
+ 	mux->lpl = id >= 0;
+ 	mux->mask = 0x3;
+ 	mux->shift = 2;
+-	mux->parent_map = sec_mux_map;
++	mux->parent_map = unique_aux ? sec_mux_map : sec_mux_map_v2;
+ 	mux->hw.init = &init;
+ 	mux->safe_sel = 0;
+ 
+@@ -191,7 +200,8 @@ krait_add_sec_mux(struct device *dev, int id, const char *s,
+ 		sec_mux_list[1].fw_name = parent_name;
+ 		sec_mux_list[1].name = parent_name;
+ 	} else {
+-		sec_mux_list[1].name = "apu_aux";
++		/* registered by krait_cc_probe() */
++		sec_mux_list[1].name = "acpu_aux";
+ 	}
+ 
+ 	ret = devm_clk_hw_register(dev, &mux->hw);

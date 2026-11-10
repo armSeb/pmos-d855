@@ -1,0 +1,220 @@
+From: armSeb <armSeb@users.noreply.github.com>
+Subject: [PATCH] soc: qcom: spm: add the MSM8974 L2 SAW Krait rail regulator
+
+On MSM8974 the four Krait cores share one rail (PM8841 S5-S8 ganged),
+and the L2 SAW is its "APCS master": writing its VCTL register sends a
+new set point (5 mV steps) to the PMIC, as downstream msm_spm_set_vdd()
+does with qcom,L2-spm-is-apcs-master. The cores are on that rail through
+their BHS, which is how the kernel powers up the secondary cores.
+
+Expose it as the "regulator" child of the L2 SAW
+("qcom,msm8974-saw2-v2.1-l2"):
+- only the voltage control registers (PMIC_STS, RST, VCTL) are touched:
+  the sequences and configuration of this SAW stay as the firmware set
+  them;
+- any CPU may drive it, under a spinlock;
+- a known set point (1.1 V) is sent at registration: the firmware may
+  have set the rail directly over SPMI, so PMIC_STS cannot be trusted,
+  and the regulator core skips requests for a selector it believes is
+  already set. 1.1 V is above what any bootloader runs the cores at
+  (downstream assumes 0.9 V) and below the 1.12 V maximum of the rail.
+
+The secondary core bring-up (kpssv2_release_secondary()) also writes VCTL
+(phase count, port 1) without that lock; it only runs on CPU hotplug.
+
+Signed-off-by: armSeb <armSeb@users.noreply.github.com>
+---
+diff --git a/drivers/soc/qcom/spm.c b/drivers/soc/qcom/spm.c
+index f75659fff..e5a9b7a33 100644
+--- a/drivers/soc/qcom/spm.c
++++ b/drivers/soc/qcom/spm.c
+@@ -18,6 +18,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/smp.h>
++#include <linux/spinlock.h>
+ 
+ #include <linux/regulator/driver.h>
+ 
+@@ -77,6 +78,12 @@ struct spm_reg_data {
+ 	struct linear_range *range;
+ 	unsigned int ramp_delay;
+ 	unsigned int init_uV;
++	/*
++	 * SAW shared by all the CPUs (L2/APCS SAW): the firmware programmed it,
++	 * only its voltage control is used, from any CPU, and the initial
++	 * voltage is read back from the hardware.
++	 */
++	bool shared;
+ };
+ 
+ struct spm_driver_data {
+@@ -85,6 +92,8 @@ struct spm_driver_data {
+ 	struct device *dev;
+ 	unsigned int volt_sel;
+ 	int reg_cpu;
++	/* serializes the voltage requests of a shared SAW */
++	spinlock_t lock;
+ };
+ 
+ static const u16 spm_reg_offset_v4_1[SPM_REG_NR] = {
+@@ -206,6 +215,43 @@ static const struct spm_reg_data spm_reg_8974_8084_cpu  = {
+ 	.start_index[PM_SLEEP_MODE_SPC] = 3,
+ };
+ 
++static void smp_set_vdd_v2_1_l2(void *data);
++
++static const u16 spm_reg_offset_v2_1_l2[SPM_REG_NR] = {
++	[SPM_REG_PMIC_STS]	= 0x14,
++	[SPM_REG_RST]		= 0x18,
++	[SPM_REG_VCTL]		= 0x1c,
++};
++
++/*
++ * MSM8974 L2 SAW: the SAW of the L2 is the "APCS master" of the Krait rail
++ * (PM8841 S5-S8 ganged, 5 mV steps, 0.35-1.275 V): writing VCTL sends the
++ * new set point to the PMIC. The Krait cores are on that rail through their
++ * BHS (power switch), as the kernel powers up the secondary cores. Only the
++ * voltage control registers are listed: the sequences and the configuration
++ * of this SAW are left as the firmware set them.
++ */
++static struct linear_range spm_v2_1_l2_regulator_range =
++	REGULATOR_LINEAR_RANGE(0, 0, 255, 5000);
++
++static const struct spm_reg_data spm_reg_8974_l2 = {
++	.reg_offset = spm_reg_offset_v2_1_l2,
++	.set_vdd = smp_set_vdd_v2_1_l2,
++	.range = &spm_v2_1_l2_regulator_range,
++	/* downstream krait-regulator.c: SLEW_RATE, uV/us */
++	.ramp_delay = 2395,
++	/*
++	 * Known, safe set point sent at registration. The firmware may have
++	 * set the rail directly over SPMI, in which case PMIC_STS does not
++	 * tell the real voltage, and the regulator core skips requests for
++	 * the selector it believes is already set. 1.1 V covers whatever
++	 * frequency the bootloader runs the cores at (downstream assumes
++	 * 0.9 V) and stays below the 1.12 V maximum of the Krait rail.
++	 */
++	.init_uV = 1100000,
++	.shared = true,
++};
++
+ /* SPM register data for 8226 */
+ static const struct spm_reg_data spm_reg_8226_cpu  = {
+ 	.reg_offset = spm_reg_offset_v2_1,
+@@ -302,10 +348,26 @@ void spm_set_low_power_mode(struct spm_driver_data *drv,
+ 	spm_register_write_sync(drv, SPM_REG_SPM_CTL, ctl_val);
+ }
+ 
++/* Any CPU can drive a shared SAW */
++static void spm_set_voltage_sel_shared(struct spm_driver_data *drv)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&drv->lock, flags);
++	drv->reg_data->set_vdd(drv);
++	spin_unlock_irqrestore(&drv->lock, flags);
++}
++
+ static int spm_set_voltage_sel(struct regulator_dev *rdev, unsigned int selector)
+ {
+ 	struct spm_driver_data *drv = rdev_get_drvdata(rdev);
+ 
++	if (drv->reg_data->shared) {
++		drv->volt_sel = selector;
++		spm_set_voltage_sel_shared(drv);
++		return 0;
++	}
++
+ 	drv->volt_sel = selector;
+ 
+ 	/* Always do the SAW register writes on the corresponding CPU */
+@@ -385,6 +447,36 @@ static void smp_set_vdd_v1_1(void *data)
+ 	}
+ }
+ 
++#define SPM_2_1_VCTL_PORT		GENMASK(18, 16)
++#define SPM_2_1_PMIC_STS_DATA		GENMASK(7, 0)
++
++/*
++ * SAW2 v2.1, voltage port 0 (downstream msm_spm_drv_set_vdd() with a
++ * SAW2 major version 2): reset the state machine, write the set point
++ * to VCTL and wait for the PMIC arbiter to report it as sent.
++ */
++static void smp_set_vdd_v2_1_l2(void *data)
++{
++	struct spm_driver_data *drv = data;
++	unsigned int vctl, sts;
++
++	/* Kick the state machine back to idle */
++	spm_register_write(drv, SPM_REG_RST, 1);
++
++	vctl = spm_register_read(drv, SPM_REG_VCTL);
++	vctl = FIELD_SET(vctl, SPM_VCTL_VLVL, drv->volt_sel);
++	vctl = FIELD_SET(vctl, SPM_2_1_VCTL_PORT, 0);
++	spm_register_write(drv, SPM_REG_VCTL, vctl);
++
++	if (read_poll_timeout_atomic(spm_register_read, sts,
++				     FIELD_GET(SPM_2_1_PMIC_STS_DATA, sts) ==
++				     drv->volt_sel,
++				     1, 200, false, drv, SPM_REG_PMIC_STS))
++		dev_err_ratelimited(drv->dev,
++				    "timeout setting the voltage (%x %x)!\n",
++				    sts, drv->volt_sel);
++}
++
+ static int spm_get_cpu(struct device *dev)
+ {
+ 	int cpu;
+@@ -440,6 +532,19 @@ static int spm_register_regulator(struct device *dev, struct spm_driver_data *dr
+ 	rdesc->n_voltages = rdesc->linear_ranges[rdesc->n_linear_ranges - 1].max_sel + 1;
+ 	rdesc->ramp_delay = drv->reg_data->ramp_delay;
+ 
++	if (drv->reg_data->shared) {
++		unsigned int sts = FIELD_GET(SPM_2_1_PMIC_STS_DATA,
++					     spm_register_read(drv, SPM_REG_PMIC_STS));
++
++		drv->volt_sel = drv->reg_data->init_uV /
++				rdesc->linear_ranges[0].step;
++		dev_info(dev, "shared SAW: last set point %u uV, now %u uV\n",
++			 sts * rdesc->linear_ranges[0].step,
++			 drv->volt_sel * rdesc->linear_ranges[0].step);
++		spm_set_voltage_sel_shared(drv);
++		goto register_regulator;
++	}
++
+ 	ret = spm_get_cpu(dev);
+ 	if (ret < 0)
+ 		return ret;
+@@ -465,6 +570,7 @@ static int spm_register_regulator(struct device *dev, struct spm_driver_data *dr
+ 	/* Always do the SAW register writes on the corresponding CPU */
+ 	smp_call_function_single(drv->reg_cpu, drv->reg_data->set_vdd, drv, true);
+ 
++register_regulator:
+ 	rdev = devm_regulator_register(dev, rdesc, &config);
+ 	if (IS_ERR(rdev)) {
+ 		dev_err(dev, "failed to register regulator\n");
+@@ -489,6 +595,8 @@ static const struct of_device_id spm_match_table[] = {
+ 	  .data = &spm_reg_8939_cpu },
+ 	{ .compatible = "qcom,msm8974-saw2-v2.1-cpu",
+ 	  .data = &spm_reg_8974_8084_cpu },
++	{ .compatible = "qcom,msm8974-saw2-v2.1-l2",
++	  .data = &spm_reg_8974_l2 },
+ 	{ .compatible = "qcom,msm8976-gold-saw2-v2.3-l2",
+ 	  .data = &spm_reg_8976_gold_l2 },
+ 	{ .compatible = "qcom,msm8976-silver-saw2-v2.3-l2",
+@@ -525,8 +633,14 @@ static int spm_dev_probe(struct platform_device *pdev)
+ 
+ 	drv->reg_data = match_id->data;
+ 	drv->dev = &pdev->dev;
++	spin_lock_init(&drv->lock);
+ 	platform_set_drvdata(pdev, drv);
+ 
++	/* A shared SAW keeps the sequences and configuration of the firmware */
++	if (drv->reg_data->shared)
++		return IS_ENABLED(CONFIG_REGULATOR) ?
++			spm_register_regulator(&pdev->dev, drv) : 0;
++
+ 	/* Write the SPM sequences first.. */
+ 	addr = drv->reg_base + drv->reg_data->reg_offset[SPM_REG_SEQ_ENTRY];
+ 	__iowrite32_copy(addr, drv->reg_data->seq,

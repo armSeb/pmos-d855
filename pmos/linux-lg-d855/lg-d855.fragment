@@ -76,3 +76,12 @@ CONFIG_CMA_SIZE_MBYTES=512
 # Bridage thermique du GPU par devfreq (zones gpu-top / gpu-bottom du DTS) :
 # indispensable avec les fréquences d'Android (jusqu'à 578 MHz)
 CONFIG_DEVFREQ_THERMAL=y
+# Fréquence des Krait (patches 0012-0015, nœuds du DTS) : HFPLL et mux
+# intégrés (le CPU tourne dessus dès le démarrage), pilote cpufreq en module :
+# « module_blacklist=qcom_cpufreq_nvmem » sur la ligne append le désactive.
+CONFIG_QCOM_HFPLL=y
+CONFIG_KRAITCC=y
+CONFIG_ARM_QCOM_CPUFREQ_NVMEM=m
+CONFIG_CPU_THERMAL=y
+# schedutil : suit la charge du planificateur, plus réactif que conservative
+CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
